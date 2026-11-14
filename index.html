@@ -11,10 +11,10 @@
      ================================================================ */
   window.APP_CONFIG = {
     // ---------- IDENTITAS ----------
-    companyName: 'PT. Podorukun Nusantara',   // dipakai di kop & footer laporan PDF
+    companyName: 'PT. Podo Rukun Nusantara',   // dipakai di kop & footer laporan PDF
     appName: 'Podorukun Nusantara Lead Tracker', // judul aplikasi (tab browser, header, login)
     groupName: 'Podorukun Nusantara',         // sebutan di pesan WA: "... hari ini di <groupName>"
-    emailDomain: 'gmail.com',                 // contoh email di halaman login
+    emailDomain: 'crm.prn',                   // akun login pakai ID: ID "angga" = angga@crm.prn (alamat buatan, bukan email asli)
     crmUrl: '',                               // link aplikasi ini (dikirim di pesan WA ke marketing); kosongkan bila belum ada
 
     // ---------- WARNA ----------
@@ -51,12 +51,12 @@
     // ---------- FIREBASE ----------
     // Salin dari Firebase Console > Project settings > Your apps > SDK setup (Config).
     firebase: {
-      apiKey: '',
-      authDomain: '',
-      projectId: '',
-      storageBucket: '',
-      messagingSenderId: '',
-      appId: ''
+      apiKey: 'AIzaSyCtATrTFtvUEqe2G5mOplp4LMIzZKkIdNM',
+      authDomain: 'crm-prn-d93a4.firebaseapp.com',
+      projectId: 'crm-prn-d93a4',
+      storageBucket: 'crm-prn-d93a4.firebasestorage.app',
+      messagingSenderId: '249285239078',
+      appId: '1:249285239078:web:e223d46bc2417ca1bce1e7'
     }
   };
 
@@ -652,8 +652,8 @@
 
       <form id="loginForm" class="space-y-4">
         <div>
-          <label class="field-label" for="loginEmail">Email</label>
-          <input required id="loginEmail" type="email" autocomplete="username" placeholder="nama@perusahaan.co.id" class="field-input">
+          <label class="field-label" for="loginEmail">ID</label>
+          <input required id="loginEmail" type="text" autocomplete="username" autocapitalize="none" autocorrect="off" spellcheck="false" placeholder="Contoh: angga" class="field-input">
         </div>
         <div>
           <label class="field-label" for="loginPassword">Password</label>
@@ -3485,9 +3485,33 @@
     const loginError = document.getElementById('loginError');
     const loginSubmitBtn = document.getElementById('loginSubmitBtn');
 
+    // ------------------------------------------------------------
+    // Login pakai ID: Firebase butuh format email, jadi ID "angga" otomatis menjadi
+    // "angga@<APP_CONFIG.emailDomain>" (alamat buatan, tidak pernah menerima email).
+    // Kalau yang diketik sudah berisi "@" (mis. akun Super Admin), dipakai apa adanya.
+    // ------------------------------------------------------------
+    function idToEmail(id) {
+      const v = String(id || '').trim().toLowerCase();
+      if (!v) return '';
+      return v.indexOf('@') !== -1 ? v : v + '@' + APP.emailDomain;
+    }
+
+    // ID login: huruf kecil, angka, titik, strip, garis bawah (3-30 karakter).
+    // Boleh juga email lengkap (mengandung "@"), mis. untuk akun Super Admin.
+    function isValidLoginId(id) {
+      const v = String(id || '');
+      return v.indexOf('@') !== -1 ? /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v) : /^[a-z0-9._-]{3,30}$/.test(v);
+    }
+
+    function emailToId(email) {
+      const e = String(email || '');
+      const suffix = '@' + String(APP.emailDomain || '').toLowerCase();
+      return e.toLowerCase().slice(-suffix.length) === suffix ? e.slice(0, -suffix.length) : e;
+    }
+
     loginForm.addEventListener('submit', function (e) {
       e.preventDefault();
-      const email = document.getElementById('loginEmail').value.trim();
+      const email = idToEmail(document.getElementById('loginEmail').value);
       const password = document.getElementById('loginPassword').value;
 
       loginError.classList.add('hidden');
@@ -3496,7 +3520,7 @@
 
       auth.signInWithEmailAndPassword(email, password)
         .catch(function (err) {
-          loginError.textContent = 'Login gagal: email atau password salah.';
+          loginError.textContent = 'Login gagal: ID atau password salah.';
           loginError.classList.remove('hidden');
         })
         .finally(function () {
@@ -3590,6 +3614,7 @@
       // Listener sesi (di luar cleanupLeadsListener supaya tidak ikut terputus saat listener lead dimulai ulang).
       startProjectsListener();
       if (isCsAdminRole(role)) startUsersListener();
+      if (role === 'SuperAdmin') startCredentialsListener();
       startSelfProfileWatcher(currentUser.uid, role);
     }
 
@@ -3598,6 +3623,7 @@
         if (typeof fn === 'function') fn();
       });
       unsubscribeUsers = unsubscribeProjects = unsubscribeSelfProfile = null;
+      stopCredentialsListener();
       usersData = [];
       applyMarketingRoster();
       if (manageModalOpen) closeManageModal();
@@ -4835,7 +4861,7 @@
 
     function authErrorMessage(err) {
       const code = err && err.code;
-      if (code === 'auth/email-already-in-use') return 'Email ini sudah terdaftar. Kalau akunnya pernah dinonaktifkan, aktifkan lagi dari daftar "akun nonaktif".';
+      if (code === 'auth/email-already-in-use') return 'ID ini sudah terdaftar. Kalau akunnya pernah dinonaktifkan, aktifkan lagi dari daftar "akun nonaktif".';
       if (code === 'auth/invalid-email') return 'Format email tidak valid.';
       if (code === 'auth/weak-password') return 'Password terlalu lemah (minimal 6 karakter).';
       if (code === 'auth/operation-not-allowed') return 'Login Email/Password belum diaktifkan di Firebase Console (Authentication > Sign-in method).';
@@ -4873,6 +4899,9 @@
       }
       if (manageView === 'deactivate') { el.innerHTML = renderDeactivatePanel(); return; }
       if (manageView === 'created') { el.innerHTML = renderCreatedPanel(); return; }
+      if (manageView === 'bulk') { el.innerHTML = renderBulkPanel(); return; }
+      if (manageView === 'setPassword') { el.innerHTML = renderSetPasswordPanel(); return; }
+      if (manageView === 'bulkResult') { el.innerHTML = renderBulkResult(); return; }
       el.innerHTML = renderUserList();
     }
 
@@ -4887,7 +4916,10 @@
       const visible = usersData.filter(function (u) { return manageShowInactive || isActiveUser(u); });
       let html = manageNoticeHtml() +
         '<div class="flex flex-wrap items-center justify-between gap-2 mb-1">' +
-          '<button type="button" onclick="openAddUser()" class="btn-primary text-white font-semibold text-sm px-4 py-2 rounded-lg">+ Tambah Akun</button>' +
+          '<div class="flex flex-wrap gap-2">' +
+            '<button type="button" onclick="openAddUser()" class="btn-primary text-white font-semibold text-sm px-4 py-2 rounded-lg">+ Tambah Akun</button>' +
+            '<button type="button" onclick="openBulkImport()" class="cancel-btn font-semibold text-sm px-4 py-2 rounded-lg">Impor Banyak Akun</button>' +
+          '</div>' +
           (inactiveCount
             ? '<label class="text-xs font-semibold text-[var(--muted)] inline-flex items-center gap-1.5 cursor-pointer">' +
                 '<input type="checkbox" onchange="toggleManageInactive(this.checked)"' + (manageShowInactive ? ' checked' : '') + '> Tampilkan akun nonaktif (' + inactiveCount + ')</label>'
@@ -4919,7 +4951,7 @@
     function renderUserRow(u) {
       const isMe = !!currentUser && u.uid === currentUser.uid;
       const active = isActiveUser(u);
-      let meta = escapeHtml(u.email || '-');
+      let meta = 'ID: ' + escapeHtml(emailToId(u.email) || '-');
       if (u.role === 'Marketing') {
         meta += ' &middot; Grup ' + (u.group === 'B' ? 'B' : 'A') +
           ' &middot; ' + (u.inRotation === false ? 'Tidak ikut rotasi iklan' : 'Rotasi iklan #' + (Number.isFinite(u.rotationOrder) ? u.rotationOrder : '-')) +
@@ -4932,7 +4964,13 @@
       const buttons = [];
       if (active) {
         buttons.push(manageBtn('Ubah', "openEditUser('" + u.uid + "')"));
-        buttons.push(manageBtn('Reset Password', "sendUserPasswordReset('" + u.uid + "')"));
+        if (credentialsData[u.uid]) {
+          buttons.push(manageBtn('Lihat Password', "showUserPassword('" + u.uid + "')"));
+          if (!isMe) buttons.push(manageBtn('Atur Ulang Password', "resetUserPassword('" + u.uid + "')"));
+        } else {
+          // Akun tanpa password tersimpan (mis. Super Admin pertama yang dibuat manual): reset lewat email.
+          buttons.push(manageBtn('Reset Password (email)', "sendUserPasswordReset('" + u.uid + "')"));
+        }
         if (!isMe) buttons.push(manageBtn('Nonaktifkan', "startDeactivateUser('" + u.uid + "')", 'danger'));
       } else {
         buttons.push(manageBtn('Aktifkan Lagi', "reactivateUser('" + u.uid + "')", 'primary'));
@@ -4997,10 +5035,10 @@
               : 'SPV/Manager &amp; Super Admin: memantau semua lead. CS: input lead. Marketing: follow-up lead miliknya.') + '</p>' +
           '</div>' +
           (isEdit
-            ? '<div class="sm:col-span-2"><p class="field-label">Email login</p><p class="text-sm">' + v(u.email || '-') + '</p></div>'
+            ? '<div class="sm:col-span-2"><p class="field-label">ID login</p><p class="text-sm">' + v(emailToId(u.email) || '-') + '</p></div>'
             : '<div>' +
-                '<label class="field-label" for="ufEmail">Email login</label>' +
-                '<input id="ufEmail" type="email" required autocomplete="off" class="field-input" placeholder="nama@' + v(APP.emailDomain) + '">' +
+                '<label class="field-label" for="ufEmail">ID login</label>' +
+                '<input id="ufEmail" type="text" required autocomplete="off" autocapitalize="none" spellcheck="false" class="field-input" placeholder="Contoh: angga">' + '<p class="text-[11px] text-[var(--muted)] mt-1">Huruf kecil/angka tanpa spasi. Dipakai untuk login (bukan email).</p>' +
               '</div>' +
               '<div>' +
                 '<label class="field-label" for="ufPassword">Password awal</label>' +
@@ -5131,9 +5169,11 @@
         return;
       }
 
-      const email = document.getElementById('ufEmail').value.trim().toLowerCase();
+      const rawId = document.getElementById('ufEmail').value.trim().toLowerCase();
+      const email = idToEmail(rawId);
       const password = document.getElementById('ufPassword').value;
-      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return showUserFormError('Format email tidak valid.');
+      if (!isValidLoginId(rawId)) return showUserFormError('ID hanya boleh huruf kecil, angka, titik, strip, atau garis bawah (3-30 karakter), tanpa spasi.');
+      if (usersData.some(function (x) { return String(x.email || '').toLowerCase() === email; })) return showUserFormError('ID "' + rawId + '" sudah dipakai.');
       if (password.length < 6) return showUserFormError('Password minimal 6 karakter.');
 
       const profile = Object.assign({
@@ -5173,7 +5213,12 @@
         .then(function () { return auth2.createUserWithEmailAndPassword(email, password); })
         .then(function (cred) {
           const newUser = cred.user;
-          return db.collection('users').doc(newUser.uid).set(profile).catch(function (err) {
+          const batch = db.batch();
+          batch.set(db.collection('users').doc(newUser.uid), profile);
+          // Password disimpan di koleksi 'credentials' yang HANYA bisa dibaca/ditulis Super Admin
+          // (lihat firestore.rules), supaya Super Admin bisa melihat & mengatur ulang password user.
+          batch.set(db.collection('credentials').doc(newUser.uid), credentialDoc(email, password));
+          return batch.commit().catch(function (err) {
             // Profil role gagal disimpan: batalkan akun login yang barusan dibuat
             // supaya email-nya bisa langsung dipakai lagi saat mencoba ulang.
             return newUser.delete().catch(function () {}).then(function () { throw err; });
@@ -5182,14 +5227,135 @@
         .finally(function () { return auth2.signOut().catch(function () {}); });
     }
 
+    // ---------- Password dikelola Super Admin ----------
+    // Paket gratis Firebase tidak mengizinkan aplikasi web mengganti password akun lain.
+    // Karena itu password tiap akun disimpan di 'credentials/{uid}' (khusus Super Admin):
+    // "Atur Ulang Password" login sebentar sebagai user tsb di instance terpisah memakai
+    // password tersimpan, lalu menggantinya dengan password acak baru.
+    let credentialsData = {};        // { uid: { email, password, updatedAt } }
+    let unsubscribeCredentials = null;
+
+    function credentialDoc(email, password) {
+      return {
+        email: email,
+        password: password,
+        updatedAt: FieldValue.serverTimestamp(),
+        updatedBy: currentUser ? currentUser.uid : ''
+      };
+    }
+
+    function startCredentialsListener() {
+      if (typeof unsubscribeCredentials === 'function') unsubscribeCredentials();
+      unsubscribeCredentials = db.collection('credentials').onSnapshot(function (snap) {
+        credentialsData = {};
+        snap.docs.forEach(function (d) { credentialsData[d.id] = d.data(); });
+        refreshManageModalIfIdle('users');
+      }, function (err) {
+        console.error('Gagal memuat data password (cek Firestore Rules koleksi credentials):', err);
+      });
+    }
+
+    function stopCredentialsListener() {
+      if (typeof unsubscribeCredentials === 'function') unsubscribeCredentials();
+      unsubscribeCredentials = null;
+      credentialsData = {};
+    }
+
+    function showUserPassword(uid) {
+      const u = findUserByUid(uid);
+      const c = credentialsData[uid];
+      if (!isSuperAdminUser() || !u || !c) return;
+      manageCreatedInfo = { name: u.name, email: u.email || c.email, password: c.password, role: u.role, mode: 'view' };
+      manageView = 'created';
+      manageNotice = '';
+      renderManageModal();
+    }
+
+    // Buka form "Atur Ulang Password": Super Admin mengetik password baru sendiri (atau klik Acak).
+    function resetUserPassword(uid) {
+      const u = findUserByUid(uid);
+      if (!isSuperAdminUser() || manageBusy || !u || !credentialsData[uid]) return;
+      manageView = 'setPassword';
+      manageEditUid = uid;
+      manageNotice = '';
+      renderManageModal();
+    }
+
+    function renderSetPasswordPanel() {
+      const u = findUserByUid(manageEditUid);
+      if (!u) { manageView = 'list'; return renderUserList(); }
+      return '<h4 class="font-bold text-base mb-1">Atur Ulang Password: ' + escapeHtml(u.name) + '</h4>' +
+        '<p class="text-sm text-[var(--muted)] mb-3">ID: ' + escapeHtml(emailToId(u.email) || '') + '. Password lama langsung tidak berlaku. Sesi yang sedang login tetap jalan sampai logout.</p>' +
+        '<form onsubmit="submitSetPassword(event)">' +
+          '<label class="field-label" for="spPassword">Password baru</label>' +
+          '<div class="flex gap-2">' +
+            '<input id="spPassword" type="text" required minlength="6" autocomplete="new-password" class="field-input" placeholder="Minimal 6 karakter">' +
+            '<button type="button" onclick="document.getElementById(\'spPassword\').value = randomPassword()" class="cancel-btn font-semibold text-xs px-3 rounded-lg">Acak</button>' +
+          '</div>' +
+          '<p id="spError" class="hidden text-sm text-[var(--red)] bg-[var(--red-bg)] rounded-lg px-3 py-2 mt-3"></p>' +
+          '<div class="flex items-center gap-3 mt-4">' +
+            '<button type="button" onclick="manageBackToList()" class="cancel-btn font-semibold text-sm px-4 py-2.5 rounded-lg flex-1">Batal</button>' +
+            '<button type="submit" id="spSubmitBtn" class="btn-primary text-white font-semibold text-sm px-4 py-2.5 rounded-lg flex-1">Simpan Password</button>' +
+          '</div>' +
+        '</form>';
+    }
+
+    function submitSetPassword(e) {
+      e.preventDefault();
+      const errEl = document.getElementById('spError');
+      const newPassword = document.getElementById('spPassword').value;
+      if (newPassword.length < 6) {
+        errEl.textContent = 'Password minimal 6 karakter.';
+        errEl.classList.remove('hidden');
+        return;
+      }
+      applyNewPassword(manageEditUid, newPassword);
+    }
+
+    function applyNewPassword(uid, newPassword) {
+      const u = findUserByUid(uid);
+      const c = credentialsData[uid];
+      if (!isSuperAdminUser() || manageBusy || !u || !c) return;
+      if (c.password === newPassword) {
+        alert('Password baru sama dengan password sekarang.');
+        return;
+      }
+      const btn = document.getElementById('spSubmitBtn');
+      if (btn) btn.textContent = 'Menyimpan...';
+      const auth2 = getUserAdminAuth();
+      setManageBusy(true);
+      auth2.setPersistence(firebase.auth.Auth.Persistence.NONE)
+        .then(function () { return auth2.signInWithEmailAndPassword(c.email || u.email, c.password); })
+        .then(function (cred) { return cred.user.updatePassword(newPassword); })
+        .then(function () { return db.collection('credentials').doc(uid).set(credentialDoc(c.email || u.email, newPassword)); })
+        .then(function () {
+          manageCreatedInfo = { name: u.name, email: u.email || c.email, password: newPassword, role: u.role, mode: 'reset' };
+          manageView = 'created';
+        })
+        .catch(function (err) {
+          const code = err && err.code;
+          const hint = (code === 'auth/wrong-password' || code === 'auth/invalid-credential' || code === 'auth/invalid-login-credentials')
+            ? 'Password tersimpan sudah tidak cocok (mungkin pernah diganti di luar aplikasi). Ganti lewat Firebase Console > Authentication, atau nonaktifkan & buat ulang akunnya.'
+            : authErrorMessage(err);
+          alert('Gagal mengatur ulang password ' + u.name + ': ' + hint);
+        })
+        .finally(function () {
+          auth2.signOut().catch(function () {});
+          setManageBusy(false);
+          renderManageModal();
+        });
+    }
+
     function renderCreatedPanel() {
       const c = manageCreatedInfo;
       if (!c) { manageView = 'list'; return renderUserList(); }
       const text = 'Akun ' + APP.appName + '\nNama: ' + c.name + '\nRole: ' + (ROLE_LABELS[c.role] || c.role) +
-        '\nEmail: ' + c.email + '\nPassword: ' + c.password + (APP.crmUrl ? '\nLink: ' + APP.crmUrl : '');
+        '\nID: ' + emailToId(c.email) + '\nPassword: ' + c.password + (APP.crmUrl ? '\nLink: ' + APP.crmUrl : '');
+      const title = c.mode === 'view' ? 'Data login ' + c.name
+        : (c.mode === 'reset' ? 'Password ' + c.name + ' berhasil diatur ulang.' : 'Akun ' + c.name + ' berhasil dibuat.');
       return '<div class="rounded-xl p-4 mb-4" style="background:var(--ok-bg);">' +
-          '<p class="font-bold" style="color:var(--ok-dark);">Akun ' + escapeHtml(c.name) + ' berhasil dibuat.</p>' +
-          '<p class="text-sm mt-1" style="color:var(--ok-dark);">Berikan data login di bawah ini ke yang bersangkutan. Password tidak bisa dilihat lagi setelah layar ini ditutup.</p>' +
+          '<p class="font-bold" style="color:var(--ok-dark);">' + escapeHtml(title) + '</p>' +
+          '<p class="text-sm mt-1" style="color:var(--ok-dark);">Berikan data login di bawah ini ke yang bersangkutan. Password bisa dilihat lagi kapan saja lewat tombol "Lihat Password".</p>' +
         '</div>' +
         '<pre id="createdInfoText" class="text-sm bg-[#faf9f5] border border-[var(--line)] rounded-xl p-3 whitespace-pre-wrap break-words mb-4">' + escapeHtml(text) + '</pre>' +
         '<div class="flex items-center gap-3">' +
@@ -5205,6 +5371,165 @@
       const done = function () { if (btn) btn.textContent = 'Tersalin ✓'; };
       if (navigator.clipboard && navigator.clipboard.writeText) {
         navigator.clipboard.writeText(el.textContent).then(done).catch(function () { alert('Gagal menyalin, salin manual dari kotak di atas.'); });
+      } else {
+        alert('Browser tidak mendukung salin otomatis, salin manual dari kotak di atas.');
+      }
+    }
+
+    // ---------- Impor banyak akun sekaligus ----------
+    // Satu baris = satu akun: "Nama | ID | Role | Password | No WA | Grup". Password dibuat acak
+    // oleh aplikasi untuk tiap akun, lalu ditampilkan sekali di layar hasil untuk disalin.
+    let manageBulkDraft = '';
+    let manageBulkResults = null;
+
+    function openBulkImport() {
+      if (!isSuperAdminUser() || manageBusy) return;
+      manageView = 'bulk';
+      manageNotice = '';
+      renderManageModal();
+    }
+
+    function parseBulkRole(raw) {
+      const r = String(raw || '').trim().toLowerCase().replace(/[\s_-]+/g, '');
+      if (r === 'cs' || r === 'customerservice') return 'CS';
+      if (['spv', 'manager', 'spv/manager', 'admin', 'supervisor', 'manajer'].indexOf(r) !== -1) return 'Admin';
+      if (r === 'marketing' || r === 'sales') return 'Marketing';
+      if (r === 'superadmin') return 'SuperAdmin';
+      return null;
+    }
+
+    function renderBulkPanel() {
+      return '<h4 class="font-bold text-base mb-2">Impor Banyak Akun</h4>' +
+        '<p class="text-sm text-[var(--muted)] mb-1">Satu baris untuk satu akun, kolom dipisah tanda <b>|</b>:</p>' +
+        '<p class="text-sm font-mono bg-[#faf9f5] border border-[var(--line)] rounded-lg px-3 py-2 mb-2">Nama | ID | Role | Password | No WA | Grup</p>' +
+        '<p class="text-xs text-[var(--muted)] mb-3">Role: <b>CS</b>, <b>SPV</b>, <b>Manager</b>, <b>Marketing</b>. Password minimal 6 karakter; kosongkan kolomnya untuk password acak. ' +
+          'No WA wajib untuk Marketing; Grup diisi A atau B (kosong = A).</p>' +
+        '<textarea id="bulkInput" rows="10" class="field-input font-mono text-xs" oninput="manageBulkDraft = this.value" placeholder="Dewi | dewi | CS | dewi123&#10;Sinta | sinta | SPV |&#10;Andi | andi | Marketing | andi123 | 081234567890 | A">' + escapeHtml(manageBulkDraft) + '</textarea>' +
+        '<div id="bulkError" class="hidden text-sm text-[var(--red)] bg-[var(--red-bg)] rounded-lg px-3 py-2 mt-3 whitespace-pre-line"></div>' +
+        '<div class="flex items-center gap-3 mt-4">' +
+          '<button type="button" onclick="manageBackToList()" class="cancel-btn font-semibold text-sm px-4 py-2.5 rounded-lg flex-1">Batal</button>' +
+          '<button type="button" id="bulkSubmitBtn" onclick="submitBulkImport()" class="btn-primary text-white font-semibold text-sm px-4 py-2.5 rounded-lg flex-1">Periksa &amp; Buat Akun</button>' +
+        '</div>';
+    }
+
+    function submitBulkImport() {
+      if (!isSuperAdminUser() || manageBusy) return;
+      const errEl = document.getElementById('bulkError');
+      errEl.classList.add('hidden');
+      const lines = document.getElementById('bulkInput').value.split(/\r?\n/);
+      const rows = [];
+      const errors = [];
+      const seenEmails = {};
+      const seenMkNames = {};
+      lines.forEach(function (line, idx) {
+        if (!line.trim()) return;
+        const no = 'Baris ' + (idx + 1) + ': ';
+        const cols = line.split('|').map(function (c) { return c.trim(); });
+        const name = (cols[0] || '').replace(/\s+/g, ' ');
+        const rawId = (cols[1] || '').toLowerCase();
+        const email = idToEmail(rawId);
+        const role = parseBulkRole(cols[2]);
+        const password = cols[3] || '';
+        const wa = cols[4] || '';
+        const groupRaw = (cols[5] || 'A').toUpperCase();
+        if (password && password.length < 6) { errors.push(no + 'password minimal 6 karakter (atau kosongkan untuk password acak).'); return; }
+        if (!name) { errors.push(no + 'nama kosong.'); return; }
+        if (!isValidLoginId(rawId)) { errors.push(no + 'ID "' + rawId + '" tidak valid (huruf kecil/angka tanpa spasi, 3-30 karakter).'); return; }
+        if (!role) { errors.push(no + 'role "' + (cols[2] || '') + '" tidak dikenal (pakai CS, SPV, Manager, atau Marketing).'); return; }
+        if (seenEmails[email]) { errors.push(no + 'ID ' + rawId + ' dobel di daftar.'); return; }
+        if (usersData.some(function (u) { return String(u.email || '').toLowerCase() === email; })) { errors.push(no + 'ID ' + rawId + ' sudah dipakai.'); return; }
+        seenEmails[email] = true;
+        if (role === 'Marketing') {
+          const waErr = validateWaNumber(wa);
+          if (waErr) { errors.push(no + 'No WA "' + wa + '" tidak valid.'); return; }
+          if (groupRaw !== 'A' && groupRaw !== 'B') { errors.push(no + 'grup harus A atau B.'); return; }
+          const key = name.toLowerCase();
+          if (seenMkNames[key] || usersData.some(function (u) { return u.role === 'Marketing' && String(u.name || '').trim().toLowerCase() === key; })) {
+            errors.push(no + 'nama marketing "' + name + '" sudah dipakai (harus unik).'); return;
+          }
+          seenMkNames[key] = true;
+        }
+        rows.push({ name: name, email: email, role: role, password: password, waNumber: wa, group: groupRaw === 'B' ? 'B' : 'A' });
+      });
+      if (!rows.length && !errors.length) errors.push('Daftar masih kosong.');
+      if (errors.length) {
+        errEl.textContent = 'Perbaiki dulu:\n' + errors.join('\n');
+        errEl.classList.remove('hidden');
+        return;
+      }
+      const summary = MANAGE_ROLE_ORDER.map(function (r) {
+        const n = rows.filter(function (x) { return x.role === r; }).length;
+        return n ? n + ' ' + ROLE_LABELS[r] : '';
+      }).filter(Boolean).join(', ');
+      if (!confirm('Buat ' + rows.length + ' akun sekarang? (' + summary + ')')) return;
+
+      setManageBusy(true);
+      const btn = document.getElementById('bulkSubmitBtn');
+      let order = nextRotationOrder();
+      const results = [];
+      rows.reduce(function (prev, row, i) {
+        return prev.then(function () {
+          if (btn) btn.textContent = 'Membuat akun ' + (i + 1) + ' dari ' + rows.length + '...';
+          const password = row.password || randomPassword();
+          const profile = {
+            name: row.name,
+            email: row.email,
+            role: row.role,
+            active: true,
+            createdAt: FieldValue.serverTimestamp(),
+            createdBy: currentUser.uid,
+            updatedAt: FieldValue.serverTimestamp()
+          };
+          if (row.role === 'Marketing') {
+            profile.waNumber = row.waNumber;
+            profile.group = row.group;
+            profile.inRotation = true;
+            profile.rotationOrder = order++;
+          }
+          return createLoginAccount(row.email, password, profile)
+            .then(function () { results.push(Object.assign({ ok: true, password: password }, row)); })
+            .catch(function (err) { results.push(Object.assign({ ok: false, error: authErrorMessage(err) }, row)); });
+        });
+      }, Promise.resolve()).then(function () {
+        manageBulkResults = results;
+        if (results.every(function (r) { return r.ok; })) manageBulkDraft = '';
+        manageView = 'bulkResult';
+        setManageBusy(false);
+        renderManageModal();
+      });
+    }
+
+    function renderBulkResult() {
+      const res = manageBulkResults || [];
+      const ok = res.filter(function (r) { return r.ok; });
+      const fail = res.filter(function (r) { return !r.ok; });
+      const text = ok.map(function (r) {
+        return r.name + ' (' + (ROLE_LABELS[r.role] || r.role) + ')\nID: ' + emailToId(r.email) + '\nPassword: ' + r.password;
+      }).join('\n\n') + (ok.length && APP.crmUrl ? '\n\nLink: ' + APP.crmUrl : '');
+      return '<div class="rounded-xl p-4 mb-4" style="background:var(--ok-bg);">' +
+          '<p class="font-bold" style="color:var(--ok-dark);">' + ok.length + ' akun berhasil dibuat' + (fail.length ? ', ' + fail.length + ' gagal' : '') + '.</p>' +
+          '<p class="text-sm mt-1" style="color:var(--ok-dark);">Salin data login di bawah dan bagikan ke masing-masing orang. Password tiap akun bisa dilihat lagi kapan saja lewat tombol "Lihat Password".</p>' +
+        '</div>' +
+        (fail.length
+          ? '<div class="text-sm text-[var(--red)] bg-[var(--red-bg)] rounded-lg px-3 py-2 mb-4">' +
+              fail.map(function (r) { return '<p><b>' + escapeHtml(r.name) + '</b> (' + escapeHtml(r.email) + '): ' + escapeHtml(r.error) + '</p>'; }).join('') +
+            '</div>'
+          : '') +
+        (ok.length ? '<pre id="bulkResultText" class="text-sm bg-[#faf9f5] border border-[var(--line)] rounded-xl p-3 whitespace-pre-wrap break-words mb-4 max-h-80 overflow-y-auto">' + escapeHtml(text) + '</pre>' : '') +
+        '<div class="flex items-center gap-3">' +
+          (ok.length ? '<button type="button" id="copyBulkBtn" onclick="copyTextFrom(\'bulkResultText\', \'copyBulkBtn\')" class="cancel-btn font-semibold text-sm px-4 py-2.5 rounded-lg flex-1">Salin Semua</button>' : '') +
+          '<button type="button" onclick="manageBulkResults = null; manageBackToList()" class="btn-primary text-white font-semibold text-sm px-4 py-2.5 rounded-lg flex-1">Kembali ke Daftar Akun</button>' +
+        '</div>';
+    }
+
+    function copyTextFrom(elId, btnId) {
+      const el = document.getElementById(elId);
+      const btn = document.getElementById(btnId);
+      if (!el) return;
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(el.textContent)
+          .then(function () { if (btn) btn.textContent = 'Tersalin ✓'; })
+          .catch(function () { alert('Gagal menyalin, salin manual dari kotak di atas.'); });
       } else {
         alert('Browser tidak mendukung salin otomatis, salin manual dari kotak di atas.');
       }
@@ -5398,7 +5723,6 @@
       const val = APP[el.getAttribute('data-cfg')];
       if (val) el.textContent = val;
     });
-    document.getElementById('loginEmail').placeholder = 'nama@' + (APP.emailDomain || 'perusahaan.co.id');
     if (!FIREBASE_CONFIG_READY) {
       document.getElementById('loginConfigWarning').classList.remove('hidden');
       loginSubmitBtn.disabled = true;
