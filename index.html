@@ -15,7 +15,7 @@
     appName: 'Podorukun Nusantara Lead Tracker', // judul aplikasi (tab browser, header, login)
     groupName: 'Podorukun Nusantara',         // sebutan di pesan WA: "... hari ini di <groupName>"
     emailDomain: 'crm.prn',                   // akun login pakai ID: ID "angga" = angga@crm.prn (alamat buatan, bukan email asli)
-    crmUrl: '',                               // link aplikasi ini (dikirim di pesan WA ke marketing); kosongkan bila belum ada
+    crmUrl: 'https://crm-prn.vercel.app',                             // link aplikasi ini (dikirim di pesan WA ke marketing); kosongkan bila belum ada
 
     // ---------- WARNA ----------
     // brand      : warna utama (tombol, fokus, aksen)
@@ -2412,8 +2412,8 @@
           ' - Status: ' + (l.status || '-') + ' - No WA: ' + (l.waNumber || '-');
       });
       return 'Halo ' + name + ', berikut adalah daftar lead yang wajib di-follow-up hari ini di ' + APP.groupName + ':\n\n' +
-        lines.join('\n') + '\n\nMohon segera ditindaklanjuti ya. Setelah di-follow-up, jangan lupa update status di CRM ya' +
-        (APP.crmUrl ? ': ' + APP.crmUrl : '.') + '\n\nTerima kasih!';
+        lines.join('\n') + '\n\nMohon segera ditindaklanjuti ya. Setelah di-follow-up, jangan lupa update status di CRM' +
+        (APP.crmUrl ? ':\n' + APP.crmUrl : '.') + '\n\nTerima kasih!';
     }
 
     // Rekap WA per marketing: menu "Kirim Rekap WA" membuka daftar nama; setiap tombol "Kirim"
@@ -3980,14 +3980,15 @@
       const lead = lastSuccessLead;
       const marketingName = lead.assignedTo;
       const number = MARKETING_WA_NUMBERS[marketingName] || '';
-      const message = 'Halo ' + marketingName + ', ada lead baru masuk nih untuk kamu! \uD83D\uDE80\n\n' +
-        '\uD83D\uDC64 Nama: ' + lead.buyerName + '\n' +
-        '\uD83D\uDCF1 No WA: ' + lead.waNumber + '\n' +
-        '\uD83D\uDCCD Proyek: ' + lead.project + '\n' +
-        '\uD83D\uDD17 Sumber: ' + lead.adSource + '\n' +
-        (lead.csNote ? '\uD83D\uDCDD Catatan: ' + lead.csNote + '\n' : '') + '\n' +
-        'Yuk segera dicek dan dihubungi ya. Setelah selesai chat, jangan lupa update statusnya di CRM ya' +
-        (APP.crmUrl ? ': ' + APP.crmUrl : '.') + '\n\n' +
+      // Sengaja tanpa emoji: di sebagian HP/WhatsApp Web emoji dari link wa.me tampil sebagai tanda tanya.
+      const message = 'Halo ' + marketingName + ', ada lead baru masuk untuk kamu!\n\n' +
+        '- Nama: ' + lead.buyerName + '\n' +
+        '- No WA: ' + lead.waNumber + '\n' +
+        '- Proyek: ' + lead.project + '\n' +
+        '- Sumber: ' + lead.adSource + '\n' +
+        (lead.csNote ? '- Catatan: ' + lead.csNote + '\n' : '') + '\n' +
+        'Yuk segera dicek dan dihubungi ya. Setelah selesai chat, jangan lupa update statusnya di CRM' +
+        (APP.crmUrl ? ':\n' + APP.crmUrl : '.') + '\n\n' +
         'Terima kasih!';
       const url = 'https://wa.me/' + toWaDigits(number) + '?text=' + encodeURIComponent(message);
       window.open(url, '_blank');
