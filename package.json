@@ -1,0 +1,9 @@
+{
+  "name": "tes-crm-prn",
+  "private": true,
+  "description": "Lead Tracker: halaman statis (index.html) + fungsi server Vercel di folder api/",
+  "engines": { "node": ">=18" },
+  "dependencies": {
+    "firebase-admin": "^12.7.0"
+  }
+}

@@ -4,6 +4,12 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Lead Tracker</title>
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#1c2a66">
+<link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Lead Tracker">
 <script>
   /* ================================================================
      PENGATURAN APLIKASI — satu-satunya bagian yang perlu diubah
@@ -56,7 +62,10 @@
       projectId: 'crm-prn-d93a4',
       storageBucket: 'crm-prn-d93a4.firebasestorage.app',
       messagingSenderId: '249285239078',
-      appId: '1:249285239078:web:e223d46bc2417ca1bce1e7'
+      appId: '1:249285239078:web:e223d46bc2417ca1bce1e7',
+      // Push notification: Firebase Console > Project settings > Cloud Messaging >
+      // Web Push certificates > "Generate key pair", lalu salin "Key pair" ke sini (boleh publik).
+      vapidKey: 'BEZK-YcCAOAiomknqxsV5bA8O3yI3rfRZCDJQaZCB6zNvX8BEZVOFAqHJxZ-tflPqOZPhtVkbI1oB0MfB3h5ZPk'
     }
   };
 
@@ -522,6 +531,12 @@
 
   /* Rekap WhatsApp Massal: tombol dropdown "Kirim Rekap WA" di header CS/SPV */
   .wa-menu{ position:relative; display:flex; align-items:center; }
+  .accept-card{ background:#fff; border:2px solid var(--brand); border-radius:1rem; padding:1rem; box-shadow:0 6px 18px rgba(0,0,0,0.08); }
+  .accept-card.is-late{ border-color:var(--red); }
+  .accept-countdown{ font-variant-numeric:tabular-nums; font-weight:800; font-size:1.75rem; line-height:1; color:var(--brand-dark); }
+  .accept-card.is-late .accept-countdown{ color:var(--red); font-size:1rem; }
+  .accept-pill{ font-variant-numeric:tabular-nums; font-weight:700; font-size:0.75rem; padding:0.15rem 0.55rem; border-radius:999px; background:var(--brand-soft); color:var(--brand-dark); white-space:nowrap; }
+  .accept-pill.is-late{ background:var(--red-bg); color:var(--red); }
   .wa-menu-item{
     display:block;
     width:100%;
@@ -700,6 +715,10 @@
             Kelola Akun
           </button>
 
+          <button type="button" id="csTestPushBtn" onclick="openTestPushModal()" class="hidden btn-ghost text-xs sm:text-sm font-semibold px-3 py-2 rounded-lg inline-flex items-center gap-1.5" title="Kirim push notification percobaan ke HP pengguna">
+            Tes Push
+          </button>
+
           <div class="wa-menu">
             <button type="button" onclick="toggleWaMenu()" class="btn-ghost text-xs sm:text-sm font-semibold px-3 py-2 rounded-lg inline-flex items-center gap-1.5" title="Kirim pengingat lead follow-up hari ini ke marketing via WhatsApp">
               Kirim Pengingat
@@ -846,6 +865,19 @@
               </div>
             </div>
           </div>
+        </div>
+      </section>
+
+      <!-- Lead Menunggu Diterima Marketing (batas waktu 5 menit, otomatis dialihkan bila lewat) -->
+      <section id="pendingAcceptSection" class="hidden bg-[var(--card)] border border-[var(--line)] rounded-2xl p-5 sm:p-7">
+        <div class="mb-4">
+          <h2 class="text-lg font-bold">Menunggu Diterima Marketing</h2>
+          <p class="text-sm text-[var(--muted)] mt-0.5">Marketing wajib menekan Terima dalam 5 menit. Lewat dari itu, lead otomatis dialihkan ke marketing berikutnya selama halaman ini terbuka. Tekan <b>Beritahu WA</b> setiap kali lead pindah marketing.</p>
+        </div>
+        <div id="pendingAcceptList" class="space-y-2.5"></div>
+        <div id="recentAcceptWrap" class="hidden mt-5">
+          <p class="text-xs font-semibold text-[var(--muted)] mb-2">Baru diterima (1 jam terakhir)</p>
+          <div id="recentAcceptList" class="space-y-1.5"></div>
         </div>
       </section>
 
@@ -1021,6 +1053,15 @@
     </header>
 
     <main class="px-4 pt-5 space-y-4 max-w-md mx-auto">
+      <!-- Lead baru yang menunggu ditekan "Terima" (batas waktu 5 menit). Diisi JS. -->
+      <div id="marketingPendingContainer" class="hidden space-y-3"></div>
+
+      <!-- Ajakan mengaktifkan push notification (disembunyikan kalau sudah aktif) -->
+      <div id="marketingPushBanner" class="hidden bg-[var(--brand-soft)] border border-[var(--line)] rounded-xl px-3.5 py-3">
+        <p id="marketingPushBannerText" class="text-sm"></p>
+        <button type="button" id="marketingPushBannerBtn" onclick="enablePushOnThisDevice()" class="btn-primary text-white font-semibold text-sm px-4 py-2 rounded-lg mt-2.5">Aktifkan Notifikasi</button>
+      </div>
+
       <!-- Filter pencarian lead: Status, Proyek, teks bebas (nama/no. WA), dan rentang tanggal
            (Tanggal Masuk / Terakhir Chat-Update). Menyaring tampilan kartu secara instan di sisi
            klien, tanpa menyentuh onSnapshot / mode Pilih / modal detail. Panel bisa dibuka/tutup
@@ -1140,6 +1181,13 @@
     </button>
 
     <!-- Modal Input Lead Mandiri (Marketing) -->
+    <!-- Kartu detail lead setelah marketing menekan "Terima" -->
+    <div id="acceptedLeadModalOverlay" class="fixed inset-0 bg-black/50 opacity-0 pointer-events-none z-40 flex hidden items-center justify-center px-4" onclick="closeAcceptedLeadModal()" style="transition:opacity 0.2s ease;">
+      <div id="acceptedLeadModalBox" class="bg-white rounded-2xl p-5 w-full max-w-sm opacity-0 scale-95 max-h-[90vh] overflow-y-auto" onclick="event.stopPropagation()" style="transition:opacity 0.2s ease, transform 0.2s ease;">
+        <div id="acceptedLeadModalBody"></div>
+      </div>
+    </div>
+
     <div id="selfLeadModalOverlay" class="fixed inset-0 bg-black/50 opacity-0 pointer-events-none z-40 flex hidden items-center justify-center px-4" onclick="closeSelfLeadModal()" style="transition:opacity 0.2s ease;">
       <div id="selfLeadModalBox" class="bg-white rounded-2xl p-5 w-full max-w-sm opacity-0 scale-95 max-h-[90vh] overflow-y-auto" onclick="event.stopPropagation()" style="transition:opacity 0.2s ease, transform 0.2s ease;">
         <h3 class="font-bold text-lg mb-1">Input Lead Mandiri</h3>
@@ -1469,6 +1517,24 @@
     </div>
   </div>
 
+  <!-- Super Admin: Tes Push Notification -->
+  <div id="testPushModalOverlay" class="fixed inset-0 bg-black/50 opacity-0 pointer-events-none z-50 flex hidden items-center justify-center px-4" onclick="closeTestPushModal()" style="transition:opacity 0.2s ease;">
+    <div id="testPushModalBox" class="bg-white rounded-2xl p-5 w-full max-w-sm opacity-0 scale-95 max-h-[90vh] overflow-y-auto" onclick="event.stopPropagation()" style="transition:opacity 0.2s ease, transform 0.2s ease;">
+      <h3 class="font-bold text-lg mb-1">Tes Push Notification</h3>
+      <p class="text-sm text-[var(--muted)] mb-4">Penerima harus sudah menekan "Aktifkan Notifikasi" di perangkatnya.</p>
+      <label class="field-label" for="testPushTarget">Kirim ke</label>
+      <select id="testPushTarget" class="field-input mb-3"></select>
+      <label class="field-label" for="testPushTitle">Judul</label>
+      <input id="testPushTitle" type="text" class="field-input mb-3" value="Lead baru masuk!">
+      <label class="field-label" for="testPushBody">Isi pesan</label>
+      <textarea id="testPushBody" rows="2" class="field-input">Ini tes notifikasi dari Super Admin. Tekan untuk membuka CRM.</textarea>
+      <p id="testPushResult" class="text-sm font-medium mt-3"></p>
+      <button type="button" id="testPushSendBtn" onclick="sendTestPush()" class="btn-primary text-white font-semibold text-sm w-full py-2.5 rounded-lg mt-3">Kirim Notifikasi</button>
+      <button type="button" onclick="enablePushFromTestModal()" class="cancel-btn w-full font-semibold text-sm py-2.5 rounded-lg mt-2">Aktifkan Notifikasi di Perangkat Ini</button>
+      <button type="button" onclick="closeTestPushModal()" class="cancel-btn w-full font-semibold text-sm py-2.5 rounded-lg mt-2">Tutup</button>
+    </div>
+  </div>
+
   <!-- Stack toast notifikasi in-app real-time (lead baru / follow-up jatuh tempo) -->
   <div id="toastStack"></div>
 
@@ -1478,6 +1544,7 @@
   <script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-auth-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-messaging-compat.js"></script>
   <!-- jsPDF + autoTable: dipakai untuk fitur Export PDF (laporan lead dengan kop perusahaan dari APP_CONFIG) -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
@@ -1521,7 +1588,8 @@
     let unsubscribeRotation = null;  // handle onSnapshot counter rotasi iklan (settings/adRotation)
     let adRotationCounter = null;    // jumlah lead iklan yang sudah dibagikan; null = dokumen counter belum ada/belum terbaca
     let allLeadsData = [];           // dipakai role CS/Admin (semua lead)
-    let marketingLeadsData = [];     // dipakai role Marketing (lead miliknya saja)
+    let marketingLeadsData = [];     // dipakai role Marketing (lead miliknya saja, yang sudah diterima)
+    let marketingPendingLeads = [];  // lead milik marketing yang belum ditekan "Terima"
     // Filter pencarian lead (Status / Proyek / teks nama & no. WA / rentang tanggal / kategori
     // Hot Prospek) — state terpisah untuk Panel Marketing dan Panel CS/Admin, murni menyaring
     // tampilan tanpa mengubah data asli. dateType menentukan field tanggal yang dipakai:
@@ -2280,7 +2348,7 @@
     // milik marketing lain. Kalau pengecekan ke server gagal, pakai hasil lokal saja (tidak memblokir penyimpanan).
     function checkDuplicateAcrossTeam(raw) {
       const d = toWaDigits(raw);
-      const local = (marketingLeadsData || []).filter(function (l) { return toWaDigits(l.waNumber) === d; });
+      const local = (marketingLeadsData || []).concat(marketingPendingLeads || []).filter(function (l) { return toWaDigits(l.waNumber) === d; });
       return db.collection('waIndex').doc(d).get().then(function (snap) {
         const map = {};
         const indexed = (snap.exists && snap.data().leads) || {};
@@ -2866,8 +2934,12 @@
       Object.keys(MARKETING_GROUPS).forEach(function (k) {
         MARKETING_GROUPS[k].forEach(function (n) { names.push(n); });
       });
+      // Akun yang sudah nonaktif tidak ikut ditampilkan walaupun catatan aktivitasnya masih ada.
+      const inactiveNames = usersData.filter(function (u) { return !isActiveUser(u) && u.name; })
+        .map(function (u) { return String(u.name).trim().toLowerCase(); });
       Object.keys(marketingActivityData).forEach(function (k) {
         const n = marketingActivityData[k].name;
+        if (inactiveNames.indexOf(k) !== -1) return;
         if (n && !names.some(function (x) { return x.trim().toLowerCase() === k; })) names.push(n);
       });
       const rows = names.map(function (n) {
@@ -3188,6 +3260,7 @@
     // Cari data lead di kedua sumber (Panel Marketing atau Panel CS/Admin), mana pun yang sedang aktif.
     function findLeadById(leadId) {
       return marketingLeadsData.find(function (l) { return l.id === leadId; }) ||
+        marketingPendingLeads.find(function (l) { return l.id === leadId; }) ||
         allLeadsData.find(function (l) { return l.id === leadId; }) ||
         null;
     }
@@ -3327,6 +3400,11 @@
       const justNotifiedIds = [];
 
       leads.forEach(function (lead) {
+        // Lead yang masuk ke daftar karena baru saja ditekan "Terima" sudah diberi tahu lewat kartu hitung mundur.
+        if (!state.knownIds.has(lead.id) && scope === 'marketing' && lead.acceptedBy) {
+          justNotifiedIds.push(lead.id);
+          return;
+        }
         if (!state.knownIds.has(lead.id)) {
           const title = scope === 'marketing' ? 'Lead baru untuk kamu' : 'Lead baru masuk';
           const msg = lead.buyerName + ' \u2013 ' + lead.project;
@@ -3459,7 +3537,8 @@
       }
       Notification.requestPermission().then(function (perm) {
         if (perm === 'granted') {
-          new Notification('Notifikasi aktif', { body: 'Kamu akan menerima notifikasi lead baru & follow-up di sini.' });
+          sendBrowserNotification('Notifikasi aktif', 'Kamu akan menerima notifikasi lead baru & follow-up di sini.');
+          registerPushToken();
         }
         const csBtn = document.getElementById('csNotifPermBtn');
         const mBtn = document.getElementById('marketingNotifPermBtn');
@@ -3470,6 +3549,11 @@
 
     function sendBrowserNotification(title, body) {
       if (!('Notification' in window) || Notification.permission !== 'granted') return;
+      // Android Chrome tidak mengizinkan `new Notification()`: pakai service worker bila sudah terdaftar.
+      if (pushSwRegistration) {
+        pushSwRegistration.showNotification(title, { body: body, icon: '/icons/icon-192.png', tag: 'crm-lead-' + Date.now() }).catch(function () {});
+        return;
+      }
       try {
         const n = new Notification(title, { body: body, tag: 'crm-lead-' + Date.now() });
         n.onclick = function () { window.focus(); n.close(); };
@@ -3568,6 +3652,7 @@
             name: profile.name || user.email
           };
           routeToRole(currentUser.role, currentUser.name);
+          initPushForCurrentUser();
         })
         .catch(function (err) {
           loginError.textContent = 'Gagal mengambil data role: ' + err.message;
@@ -3580,6 +3665,8 @@
       maybeRequestNotifPermission();
       const manageBtn = document.getElementById('csManageBtn');
       if (manageBtn) manageBtn.classList.add('hidden');
+      const testPushBtn = document.getElementById('csTestPushBtn');
+      if (testPushBtn) testPushBtn.classList.add('hidden');
       if (role === 'CS') {
         document.getElementById('csHeaderTitle').textContent = APP.appName + ' - Panel CS';
         document.getElementById('csHeaderSubtitle').textContent = 'Panel CS';
@@ -3596,6 +3683,7 @@
         document.getElementById('csInputSection').classList.add('hidden');
         document.getElementById('csHistoryBtn').classList.add('hidden');
         if (isSuper && manageBtn) manageBtn.classList.remove('hidden');
+        if (isSuper && testPushBtn) testPushBtn.classList.remove('hidden');
         showView('cs');
         startLeadsListenerCsAdmin();
       } else if (role === 'Marketing') {
@@ -3633,7 +3721,7 @@
     // Logout
     // ------------------------------------------------------------
     function handleLogout() {
-      auth.signOut();
+      unregisterPushTokenForLogout().then(function () { auth.signOut(); });
     }
 
     function cleanupLeadsListener() {
@@ -3661,6 +3749,10 @@
       adRotationCounter = null;
       allLeadsData = [];
       marketingLeadsData = [];
+      marketingPendingLeads = [];
+      knownPendingIds = null;
+      reassignInFlight.clear();
+      closeAcceptedLeadModal();
       currentDetailMarketing = null;
       marketingSelectMode = false;
       marketingSelectedIds.clear();
@@ -3707,6 +3799,8 @@
           if (currentDetailMarketing) renderDetailTable(currentDetailMarketing);
           if (riwayatModalOpen) renderRiwayat();
           renderAdRotationInfo();
+          renderPendingAcceptPanel();
+          checkExpiredPendingLeads();
           updateNotifBadge('csAdmin', allLeadsData);
           processRealtimeNotifications('csAdmin', allLeadsData);
           syncWaIndex();
@@ -3977,21 +4071,9 @@
     // sapaan otomatis berisi rincian lead yang baru saja disubmit.
     function sendSuccessWaNotif() {
       if (!lastSuccessLead) return;
-      const lead = lastSuccessLead;
-      const marketingName = lead.assignedTo;
-      const number = MARKETING_WA_NUMBERS[marketingName] || '';
-      // Sengaja tanpa emoji: di sebagian HP/WhatsApp Web emoji dari link wa.me tampil sebagai tanda tanya.
-      const message = 'Halo ' + marketingName + ', ada lead baru masuk untuk kamu!\n\n' +
-        '- Nama: ' + lead.buyerName + '\n' +
-        '- No WA: ' + lead.waNumber + '\n' +
-        '- Proyek: ' + lead.project + '\n' +
-        '- Sumber: ' + lead.adSource + '\n' +
-        (lead.csNote ? '- Catatan: ' + lead.csNote + '\n' : '') + '\n' +
-        'Yuk segera dicek dan dihubungi ya. Setelah selesai chat, jangan lupa update statusnya di CRM' +
-        (APP.crmUrl ? ':\n' + APP.crmUrl : '.') + '\n\n' +
-        'Terima kasih!';
-      const url = 'https://wa.me/' + toWaDigits(number) + '?text=' + encodeURIComponent(message);
-      window.open(url, '_blank');
+      // Pakai data terbaru dari Firestore: bisa jadi lead sudah dialihkan ke marketing lain.
+      const live = lastSuccessLead.id ? allLeadsData.find(function (l) { return l.id === lastSuccessLead.id; }) : null;
+      sendAcceptWaNotif(live || lastSuccessLead);
     }
 
     // ------------------------------------------------------------
@@ -4040,9 +4122,14 @@
           status: 'New',
           isHot: false, // tag "Hot Prospek": default belum ditandai, bisa diubah lewat kartu/modal detail
           nextFollowUpDate: defaultNextFollowUp(), // default: 3 hari dari hari ini
+          // Wajib "Terima" dalam ACCEPT_WINDOW_MS; lewat dari itu dialihkan ke marketing berikutnya.
+          pendingAccept: true,
+          acceptDeadline: firebase.firestore.Timestamp.fromMillis(Date.now() + ACCEPT_WINDOW_MS),
+          passedFrom: [],
           createdAt: FieldValue.serverTimestamp(),
           lastUpdated: FieldValue.serverTimestamp()
         };
+        const newLeadRef = db.collection('leads').doc();
 
         // Lead Tab Iklan: giliran diambil & counter dinaikkan dalam satu transaksi atomik bersama
         // penyimpanan lead, sehingga dua CS yang submit bersamaan tidak mendapat marketing yang sama
@@ -4050,7 +4137,6 @@
         let savePromise;
         if (isAdLead) {
           const rotRef = db.collection('settings').doc('adRotation');
-          const newLeadRef = db.collection('leads').doc();
           savePromise = db.runTransaction(function (tx) {
             return tx.get(rotRef).then(function (snap) {
               const counter = snap.exists
@@ -4063,7 +4149,7 @@
             });
           });
         } else {
-          savePromise = db.collection('leads').add(newLeadData);
+          savePromise = newLeadRef.set(newLeadData);
         }
 
         savePromise.then(function () {
@@ -4077,6 +4163,7 @@
           // Tampilkan Kartu Sukses (menggantikan form sementara) berisi rincian lead
           // yang baru disubmit, lengkap dengan tombol "Beritahu ke WA" ke marketing bertugas.
           showCsSuccessCard({
+            id: newLeadRef.id,
             buyerName: buyerName,
             waNumber: waNumber,
             adSource: adSource,
@@ -4094,6 +4181,602 @@
       });
     }
 
+    // ============================================================
+    // Push Notification (Firebase Cloud Messaging)
+    // ------------------------------------------------------------
+    // - Setiap pengguna yang mengizinkan notifikasi menyimpan token perangkatnya di
+    //   pushTokens/{uid} { uid, name, role, tokens:[...] }. Satu akun bisa punya banyak perangkat.
+    // - Pengiriman dilakukan server (api/send-push.js di Vercel) memakai Firebase Admin SDK,
+    //   karena kunci server tidak boleh ada di halaman ini.
+    // - Butuh APP.firebase.vapidKey (Firebase Console > Project settings > Cloud Messaging >
+    //   Web Push certificates > Generate key pair, salin "Key pair").
+    // ============================================================
+    const PUSH_TOKEN_STORE_KEY = 'crmPushToken';
+    let pushSwRegistration = null;
+    let pushMessaging = null;
+    let pushOnMessageBound = false;
+
+    function isIosDevice() {
+      return /iphone|ipad|ipod/i.test(navigator.userAgent) ||
+        (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+    }
+
+    function isStandaloneApp() {
+      return (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) || window.navigator.standalone === true;
+    }
+
+    function pushBrowserSupported() {
+      return 'serviceWorker' in navigator && 'Notification' in window && 'PushManager' in window &&
+        !!(window.firebase && firebase.messaging);
+    }
+
+    // Alasan push belum bisa dipakai di perangkat ini, atau '' kalau bisa.
+    function pushUnsupportedReason() {
+      if (isIosDevice() && !isStandaloneApp()) {
+        return 'Di iPhone/iPad, buka CRM lewat Safari, tekan tombol Share lalu "Add to Home Screen" (Tambah ke Layar Utama), lalu buka CRM dari ikon itu.';
+      }
+      if (!pushBrowserSupported()) return 'Browser ini belum mendukung push notification. Gunakan Chrome terbaru.';
+      if (!APP.firebase || !APP.firebase.vapidKey) return 'Push belum dikonfigurasi (vapidKey di APP_CONFIG masih kosong).';
+      return '';
+    }
+
+    function getPushSwRegistration() {
+      if (pushSwRegistration) return Promise.resolve(pushSwRegistration);
+      return navigator.serviceWorker.register('/firebase-messaging-sw.js').then(function (reg) {
+        pushSwRegistration = reg;
+        return reg;
+      });
+    }
+
+    // Ambil token perangkat & simpan ke Firestore. Hanya dipanggil kalau izin sudah 'granted'.
+    function registerPushToken() {
+      if (!currentUser || pushUnsupportedReason() || Notification.permission !== 'granted') return Promise.resolve(null);
+      return getPushSwRegistration().then(function (reg) {
+        if (!pushMessaging) pushMessaging = firebase.messaging();
+        if (!pushOnMessageBound) {
+          pushOnMessageBound = true;
+          // Saat aplikasi sedang terbuka, FCM tidak menampilkan notifikasi sistem: tampilkan sendiri.
+          pushMessaging.onMessage(function (payload) {
+            const n = payload.notification || payload.data || {};
+            const title = n.title || 'Notifikasi';
+            const body = n.body || '';
+            pushToast({ type: 'new', title: title, message: body });
+            reg.showNotification(title, { body: body, icon: '/icons/icon-192.png', tag: 'crm-fg-' + Date.now() }).catch(function () {});
+          });
+        }
+        return pushMessaging.getToken({ vapidKey: APP.firebase.vapidKey, serviceWorkerRegistration: reg });
+      }).then(function (token) {
+        if (!token || !currentUser) return null;
+        try { localStorage.setItem(PUSH_TOKEN_STORE_KEY, token); } catch (e) {}
+        return db.collection('pushTokens').doc(currentUser.uid).set({
+          uid: currentUser.uid,
+          name: currentUser.name,
+          role: currentUser.role,
+          tokens: FieldValue.arrayUnion(token),
+          updatedAt: FieldValue.serverTimestamp()
+        }, { merge: true }).then(function () { return token; });
+      }).catch(function (err) {
+        console.error('Gagal mendaftarkan push notification:', err);
+        return null;
+      }).finally(renderPushBanner);
+    }
+
+    // Dipanggil dari tombol (perlu klik pengguna, terutama di iPhone).
+    function enablePushOnThisDevice() {
+      const reason = pushUnsupportedReason();
+      if (reason) { alert(reason); return Promise.resolve(null); }
+      return Notification.requestPermission().then(function (perm) {
+        renderPushBanner();
+        if (perm !== 'granted') {
+          alert('Izin notifikasi ditolak. Buka pengaturan situs di browser (ikon gembok di samping alamat) lalu izinkan Notifikasi.');
+          return null;
+        }
+        return registerPushToken().then(function (token) {
+          if (!token) alert('Gagal mengaktifkan notifikasi di perangkat ini. Coba muat ulang halaman lalu ulangi.');
+          return token;
+        });
+      });
+    }
+
+    // Lepas token perangkat ini dari akun sebelum logout, supaya HP bersama tidak menerima notif akun lain.
+    function unregisterPushTokenForLogout() {
+      let token = null;
+      try { token = localStorage.getItem(PUSH_TOKEN_STORE_KEY); localStorage.removeItem(PUSH_TOKEN_STORE_KEY); } catch (e) {}
+      if (!token || !currentUser) return Promise.resolve();
+      const p = db.collection('pushTokens').doc(currentUser.uid)
+        .update({ tokens: FieldValue.arrayRemove(token) }).catch(function () {});
+      // Jangan sampai logout tertahan lama kalau jaringan lambat.
+      return Promise.race([p, new Promise(function (r) { setTimeout(r, 2500); })]);
+    }
+
+    function renderPushBanner() {
+      const banner = document.getElementById('marketingPushBanner');
+      if (!banner) return;
+      // Belum dikonfigurasi (vapidKey kosong): jangan tampilkan pesan teknis ke marketing.
+      const configured = !!(APP.firebase && APP.firebase.vapidKey);
+      const show = configured && !!currentUser && currentUser.role === 'Marketing' &&
+        (pushUnsupportedReason() !== '' || !('Notification' in window) || Notification.permission !== 'granted');
+      banner.classList.toggle('hidden', !show);
+      if (!show) return;
+      const textEl = document.getElementById('marketingPushBannerText');
+      const btn = document.getElementById('marketingPushBannerBtn');
+      const reason = pushUnsupportedReason();
+      if (reason) {
+        textEl.textContent = reason;
+        btn.classList.add('hidden');
+      } else if (Notification.permission === 'denied') {
+        textEl.textContent = 'Notifikasi diblokir. Izinkan Notifikasi di pengaturan situs browser supaya lead baru langsung masuk ke HP kamu.';
+        btn.classList.add('hidden');
+      } else {
+        textEl.textContent = 'Aktifkan notifikasi supaya lead baru langsung muncul di HP kamu, walaupun CRM sedang ditutup.';
+        btn.classList.remove('hidden');
+      }
+    }
+
+    function initPushForCurrentUser() {
+      renderPushBanner();
+      if ('Notification' in window && Notification.permission === 'granted') registerPushToken();
+    }
+
+    // ---------- Super Admin: Tes Push ----------
+    function openTestPushModal() {
+      if (!isSuperAdminUser()) return;
+      const overlay = document.getElementById('testPushModalOverlay');
+      const box = document.getElementById('testPushModalBox');
+      document.getElementById('testPushResult').textContent = '';
+      renderTestPushTargets({});
+      overlay.classList.remove('hidden', 'pointer-events-none');
+      void overlay.offsetWidth;
+      overlay.style.opacity = '1';
+      box.style.opacity = '1';
+      box.style.transform = 'scale(1)';
+      // Tandai siapa saja yang sudah mengaktifkan notifikasi (butuh izin baca pushTokens untuk Super Admin).
+      db.collection('pushTokens').get().then(function (snap) {
+        const map = {};
+        snap.docs.forEach(function (d) { map[d.id] = (d.data().tokens || []).length; });
+        renderTestPushTargets(map);
+      }).catch(function (err) { console.warn('Tidak bisa membaca pushTokens:', err); });
+    }
+
+    function closeTestPushModal() {
+      const overlay = document.getElementById('testPushModalOverlay');
+      const box = document.getElementById('testPushModalBox');
+      overlay.style.opacity = '0';
+      box.style.opacity = '0';
+      box.style.transform = 'scale(0.95)';
+      overlay.classList.add('pointer-events-none');
+      setTimeout(function () { overlay.classList.add('hidden'); }, 200);
+    }
+
+    function renderTestPushTargets(deviceCounts) {
+      const sel = document.getElementById('testPushTarget');
+      const current = sel.value;
+      const known = Object.keys(deviceCounts).length > 0;
+      const label = function (u) {
+        const n = deviceCounts[u.uid] || 0;
+        return u.name + ' (' + (ROLE_LABELS[u.role] || u.role) + ')' + (known ? (n ? ' - ' + n + ' perangkat aktif' : ' - belum aktif') : '');
+      };
+      const me = currentUser ? usersData.find(function (u) { return u.uid === currentUser.uid; }) : null;
+      const others = usersData.filter(function (u) { return isActiveUser(u) && (!currentUser || u.uid !== currentUser.uid); })
+        .sort(function (a, b) { return String(a.name).localeCompare(String(b.name)); });
+      sel.innerHTML =
+        '<option value="' + escapeHtml(currentUser ? currentUser.uid : '') + '">Saya sendiri' + (me ? ' (' + escapeHtml(label(me).split(' - ')[1] || '') + ')' : '') + '</option>' +
+        '<option value="__all__">Semua yang sudah aktif</option>' +
+        others.map(function (u) { return '<option value="' + escapeHtml(u.uid) + '">' + escapeHtml(label(u)) + '</option>'; }).join('');
+      if (current && Array.prototype.some.call(sel.options, function (o) { return o.value === current; })) sel.value = current;
+    }
+
+    function sendTestPush() {
+      if (!isSuperAdminUser()) return;
+      const btn = document.getElementById('testPushSendBtn');
+      const resultEl = document.getElementById('testPushResult');
+      const targetUid = document.getElementById('testPushTarget').value;
+      const title = document.getElementById('testPushTitle').value.trim() || 'Tes Notifikasi';
+      const body = document.getElementById('testPushBody').value.trim() || 'Push notification berhasil diterima.';
+      btn.disabled = true;
+      btn.textContent = 'Mengirim...';
+      resultEl.style.color = 'var(--muted)';
+      resultEl.textContent = '';
+      auth.currentUser.getIdToken().then(function (idToken) {
+        return fetch('/api/send-push', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + idToken },
+          body: JSON.stringify({ targetUid: targetUid, title: title, body: body })
+        });
+      }).then(function (r) {
+        return r.text().then(function (t) {
+          let data = {};
+          try { data = JSON.parse(t); } catch (e) {}
+          if (!r.ok) {
+            throw new Error(data.error || (r.status === 404 && !data.error
+              ? 'Server notifikasi (api/send-push) belum ter-deploy di Vercel.'
+              : 'Server merespons ' + r.status));
+          }
+          return data;
+        });
+      }).then(function (data) {
+        resultEl.style.color = data.sent ? '#1f8a5c' : 'var(--red)';
+        resultEl.textContent = 'Terkirim ke ' + data.sent + ' dari ' + data.devices + ' perangkat' +
+          (data.failed ? ' (' + data.failed + ' gagal' + (data.removed ? ', ' + data.removed + ' token kedaluwarsa dibersihkan' : '') + ')' : '') + '.';
+      }).catch(function (err) {
+        resultEl.style.color = 'var(--red)';
+        resultEl.textContent = 'Gagal: ' + (err && err.message);
+      }).finally(function () {
+        btn.disabled = false;
+        btn.textContent = 'Kirim Notifikasi';
+      });
+    }
+
+    function enablePushFromTestModal() {
+      enablePushOnThisDevice().then(function (token) {
+        if (token) document.getElementById('testPushResult').textContent = 'Notifikasi aktif di perangkat ini.';
+        openTestPushModal();
+      });
+    }
+
+    // ============================================================
+    // Terima Lead (batas waktu 5 menit)
+    // ------------------------------------------------------------
+    // - Setiap lead yang diinput CS (Tab Umum maupun Iklan) disimpan dengan
+    //   pendingAccept:true + acceptDeadline (sekarang + 5 menit) + passedFrom:[].
+    // - Marketing melihat kartu "Lead baru masuk" (proyek & sumber saja) dengan hitung
+    //   mundur dan tombol "Terima". Nama & nomor buyer baru tampil setelah diterima.
+    // - Lewat 5 menit belum diterima: Panel CS/Admin yang sedang terbuka mengalihkan lead
+    //   ke marketing berikutnya di rotasi iklan (yang belum pernah dilewati lead ini),
+    //   lewat transaksi supaya beberapa CS yang online tidak mengalihkan dua kali.
+    //   Kalau semua marketing sudah dilewati, lead ditandai acceptExhausted dan tetap
+    //   di marketing terakhir (masih bisa diterima) sampai CS menanganinya manual.
+    // - Pesan WA ke marketing tetap dikirim manual oleh CS (tombol "Beritahu WA").
+    // ============================================================
+    const ACCEPT_WINDOW_MS = 5 * 60 * 1000;
+    let knownPendingIds = null;            // id lead pending yang sudah pernah tampil (null = snapshot pertama)
+    const reassignInFlight = new Set();    // id lead yang sedang dialihkan oleh klien ini
+    let acceptedModalLead = null;
+    let acceptAudioCtx = null;
+
+    function isPendingAccept(l) { return !!l && l.pendingAccept === true; }
+
+    function acceptDeadlineMs(l) {
+      return l && l.acceptDeadline ? toJsDate(l.acceptDeadline).getTime() : 0;
+    }
+
+    function formatCountdown(ms) {
+      const t = Math.max(0, Math.ceil(ms / 1000));
+      return String(Math.floor(t / 60)).padStart(2, '0') + ':' + String(t % 60).padStart(2, '0');
+    }
+
+    function formatClock(ms) {
+      const d = new Date(ms);
+      return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
+    }
+
+    // ---------- Pesan WA ke marketing (dikirim manual oleh CS) ----------
+    // Sengaja tanpa nama & nomor buyer: marketing harus menekan Terima di CRM dulu.
+    function sendAcceptWaNotif(lead) {
+      if (!lead) return;
+      const marketingName = lead.assignedTo;
+      const number = MARKETING_WA_NUMBERS[marketingName] || '';
+      if (!number) {
+        alert('Nomor WA marketing ' + marketingName + ' belum diisi. Lengkapi di menu Kelola Akun.');
+        return;
+      }
+      const deadline = acceptDeadlineMs(lead) || (Date.now() + ACCEPT_WINDOW_MS);
+      // Sengaja tanpa emoji: di sebagian HP/WhatsApp Web emoji dari link wa.me tampil sebagai tanda tanya.
+      const message = 'Halo ' + marketingName + ', ada LEAD BARU masuk untuk kamu!\n\n' +
+        '- Proyek: ' + (lead.project || '-') + '\n' +
+        '- Sumber: ' + (lead.adSource || '-') + '\n\n' +
+        'Segera buka CRM dan tekan TERIMA sebelum jam ' + formatClock(deadline) + ' (batas 5 menit). ' +
+        'Kalau lewat, lead otomatis dialihkan ke marketing lain.' +
+        (APP.crmUrl ? '\n\n' + APP.crmUrl : '') + '\n\n' +
+        'Nama & nomor buyer akan muncul setelah kamu menekan Terima. Terima kasih!';
+      window.open('https://wa.me/' + toWaDigits(number) + '?text=' + encodeURIComponent(message), '_blank');
+    }
+
+    // ---------- Panel CS/Admin: daftar lead menunggu diterima ----------
+    function renderPendingAcceptPanel() {
+      const section = document.getElementById('pendingAcceptSection');
+      if (!section) return;
+      const now = Date.now();
+      const pending = allLeadsData.filter(isPendingAccept).sort(function (a, b) {
+        return acceptDeadlineMs(a) - acceptDeadlineMs(b);
+      });
+      const recent = allLeadsData.filter(function (l) {
+        return !isPendingAccept(l) && l.acceptedAt && now - toJsDate(l.acceptedAt).getTime() < 60 * 60 * 1000;
+      }).sort(function (a, b) { return toJsDate(b.acceptedAt) - toJsDate(a.acceptedAt); });
+
+      if (!pending.length && !recent.length) {
+        section.classList.add('hidden');
+        return;
+      }
+      section.classList.remove('hidden');
+
+      const listEl = document.getElementById('pendingAcceptList');
+      listEl.innerHTML = pending.length ? pending.map(function (l) {
+        const safeId = escapeHtml(l.id);
+        const left = acceptDeadlineMs(l) - now;
+        const late = left <= 0;
+        let pill;
+        if (l.acceptExhausted) {
+          pill = '<span class="accept-pill is-late">Semua marketing sudah dilewati</span>';
+        } else if (late) {
+          pill = '<span class="accept-pill is-late" data-accept-deadline="' + acceptDeadlineMs(l) + '" data-late="1">Lewat waktu &ndash; dialihkan...</span>';
+        } else {
+          pill = '<span class="accept-pill" data-accept-deadline="' + acceptDeadlineMs(l) + '" data-late="0">' + formatCountdown(left) + '</span>';
+        }
+        const passed = (l.passedFrom || []).filter(Boolean);
+        return '<div class="border border-[var(--line)] rounded-xl px-3.5 py-3">' +
+          '<div class="flex flex-wrap items-start justify-between gap-2">' +
+            '<div class="min-w-0 flex-1">' +
+              '<p class="font-semibold text-sm">' + escapeHtml(l.buyerName || '-') + ' <span class="font-normal text-[var(--muted)]">&middot; ' + escapeHtml(l.project || '-') + '</span></p>' +
+              '<p class="text-xs text-[var(--muted)] mt-0.5">Menunggu diterima <b class="text-[var(--ink)]">' + escapeHtml(l.assignedTo || '-') + '</b>' +
+                (passed.length ? ' &middot; dialihkan dari ' + escapeHtml(passed.join(', ')) : '') + '</p>' +
+              (l.acceptExhausted ? '<p class="text-xs mt-1" style="color:var(--red);">Tidak ada marketing lain yang tersisa. Hubungi marketing secara langsung atau alihkan manual.</p>' : '') +
+            '</div>' + pill +
+          '</div>' +
+          '<div class="flex flex-wrap gap-1.5 mt-2.5">' +
+            '<button type="button" onclick="notifyPendingLeadWa(\'' + safeId + '\')" class="text-white font-semibold text-xs px-3 py-1.5 rounded-lg" style="background:#1f8a5c;">Beritahu WA</button>' +
+            '<button type="button" onclick="reassignPendingLead(\'' + safeId + '\', true)" class="cancel-btn font-semibold text-xs px-3 py-1.5 rounded-lg">Alihkan Sekarang</button>' +
+          '</div>' +
+        '</div>';
+      }).join('') : '<p class="text-sm text-[var(--muted)]">Tidak ada lead yang menunggu diterima.</p>';
+
+      const recentWrap = document.getElementById('recentAcceptWrap');
+      const recentEl = document.getElementById('recentAcceptList');
+      recentWrap.classList.toggle('hidden', !recent.length);
+      recentEl.innerHTML = recent.map(function (l) {
+        const mins = Math.max(0, Math.round((toJsDate(l.acceptedAt) - toJsDate(l.createdAt)) / 60000));
+        return '<p class="text-xs"><b>' + escapeHtml(l.buyerName || '-') + '</b> diterima ' + escapeHtml(l.acceptedBy || l.assignedTo || '-') +
+          ' pukul ' + formatClock(toJsDate(l.acceptedAt).getTime()) + ' (' + (mins < 1 ? '< 1' : mins) + ' menit setelah masuk' +
+          (l.acceptedLate ? ', terlambat' : '') + ')</p>';
+      }).join('');
+    }
+
+    function notifyPendingLeadWa(leadId) {
+      sendAcceptWaNotif(allLeadsData.find(function (l) { return l.id === leadId; }));
+    }
+
+    // Marketing berikutnya di rotasi iklan setelah pemegang saat ini, melewati yang sudah pernah dilewati lead ini.
+    // null = daftar marketing belum termuat (jangan ambil keputusan), '' = tidak ada lagi yang tersisa.
+    function nextAcceptCandidate(d) {
+      let pool = AD_ROTATION_LIST.slice();
+      if (!pool.length) pool = activeMarketingUsers().map(function (u) { return u.name; });
+      if (!pool.length) return null;
+      const tried = new Set((d.passedFrom || []).concat([d.assignedTo]));
+      const start = pool.indexOf(d.assignedTo);
+      for (let i = 1; i <= pool.length; i++) {
+        const name = pool[(start + i + pool.length) % pool.length];
+        if (!tried.has(name)) return name;
+      }
+      return '';
+    }
+
+    // force=true: tombol "Alihkan Sekarang" (tanpa menunggu batas waktu).
+    function reassignPendingLead(leadId, force) {
+      if (!currentUser || !isCsAdminRole(currentUser.role)) return Promise.resolve();
+      if (reassignInFlight.has(leadId)) return Promise.resolve();
+      if (force && !confirm('Alihkan lead ini ke marketing berikutnya sekarang?')) return Promise.resolve();
+      reassignInFlight.add(leadId);
+      const ref = db.collection('leads').doc(leadId);
+      let result = null;
+      return db.runTransaction(function (tx) {
+        result = null;
+        return tx.get(ref).then(function (snap) {
+          if (!snap.exists) return;
+          const d = snap.data();
+          if (d.pendingAccept !== true) return;
+          if (!force && (d.acceptExhausted || acceptDeadlineMs(d) > Date.now())) return;
+          const next = nextAcceptCandidate(d);
+          if (next === null) return;
+          if (!next) {
+            if (!d.acceptExhausted) tx.update(ref, { acceptExhausted: true });
+            result = { exhausted: true, d: d };
+            return;
+          }
+          tx.update(ref, {
+            assignedTo: next,
+            passedFrom: FieldValue.arrayUnion(d.assignedTo),
+            acceptDeadline: firebase.firestore.Timestamp.fromMillis(Date.now() + ACCEPT_WINDOW_MS),
+            acceptExhausted: false,
+            reassignCount: FieldValue.increment(1),
+            lastReassignAt: FieldValue.serverTimestamp()
+          });
+          result = { from: d.assignedTo, to: next, d: d };
+        });
+      }).then(function () {
+        if (result && result.to) {
+          addNotification('csAdmin', 'followup', 'Lead dialihkan ke ' + result.to,
+            (result.d.buyerName || 'Lead') + ': ' + result.from + ' tidak menerima. Tekan Beritahu WA untuk ' + result.to + '.', leadId);
+        } else if (result && result.exhausted && force) {
+          alert('Tidak ada marketing lain di rotasi yang belum dilewati lead ini.');
+        }
+      }).catch(function (err) {
+        console.error('Gagal mengalihkan lead:', err);
+        if (force) alert('Gagal mengalihkan lead: ' + (err && err.message));
+      }).finally(function () {
+        reassignInFlight.delete(leadId);
+      });
+    }
+
+    function checkExpiredPendingLeads() {
+      if (!currentUser || !isCsAdminRole(currentUser.role)) return;
+      const now = Date.now();
+      allLeadsData.forEach(function (l) {
+        if (isPendingAccept(l) && !l.acceptExhausted && acceptDeadlineMs(l) && acceptDeadlineMs(l) <= now) {
+          reassignPendingLead(l.id, false);
+        }
+      });
+    }
+
+    // ---------- Panel Marketing: kartu "Lead baru masuk" ----------
+    function renderMarketingPending() {
+      const box = document.getElementById('marketingPendingContainer');
+      if (!box) return;
+
+      const ids = new Set(marketingPendingLeads.map(function (l) { return l.id; }));
+      if (knownPendingIds) {
+        marketingPendingLeads.forEach(function (l) {
+          if (!knownPendingIds.has(l.id)) {
+            playAcceptAlert();
+            addNotification('marketing', 'new', 'Lead baru masuk!', (l.project || '-') + ' – tekan Terima dalam 5 menit', null);
+          }
+        });
+      }
+      knownPendingIds = ids;
+
+      if (!marketingPendingLeads.length) {
+        box.classList.add('hidden');
+        box.innerHTML = '';
+        return;
+      }
+      const now = Date.now();
+      const list = marketingPendingLeads.slice().sort(function (a, b) { return acceptDeadlineMs(a) - acceptDeadlineMs(b); });
+      box.innerHTML = list.map(function (l) {
+        const safeId = escapeHtml(l.id);
+        const deadline = acceptDeadlineMs(l);
+        const left = deadline - now;
+        const late = left <= 0;
+        return '<article class="accept-card' + (late ? ' is-late' : '') + '">' +
+          '<div class="flex items-start justify-between gap-3">' +
+            '<div class="min-w-0">' +
+              '<p class="text-xs font-bold uppercase tracking-wide" style="color:' + (late ? 'var(--red)' : 'var(--brand)') + ';">Lead baru masuk</p>' +
+              '<h2 class="font-bold text-[15px] mt-1">' + escapeHtml(l.project || '-') + '</h2>' +
+              '<p class="text-sm text-[var(--muted)] mt-0.5">Sumber: ' + escapeHtml(l.adSource || '-') + '</p>' +
+            '</div>' +
+            '<div class="text-right flex-shrink-0">' +
+              (late ? '' : '<p class="text-[11px] text-[var(--muted)] mb-1">Sisa waktu</p>') +
+              '<span class="accept-countdown" data-accept-deadline="' + deadline + '" data-late="' + (late ? '1' : '0') + '">' + (late ? 'Waktu habis' : formatCountdown(left)) + '</span>' +
+            '</div>' +
+          '</div>' +
+          '<p class="text-xs text-[var(--muted)] mt-2">' + (late
+            ? 'Batas waktu sudah lewat. Lead bisa dialihkan ke marketing lain kapan saja &ndash; terima sekarang selagi masih ada.'
+            : 'Nama &amp; nomor buyer muncul setelah kamu menekan Terima.') + '</p>' +
+          '<button type="button" class="btn-primary text-white font-semibold text-base w-full py-3 rounded-lg mt-3" onclick="acceptPendingLead(\'' + safeId + '\', this)">Terima Lead</button>' +
+        '</article>';
+      }).join('');
+      box.classList.remove('hidden');
+    }
+
+    function playAcceptAlert() {
+      try { if (navigator.vibrate) navigator.vibrate([300, 150, 300]); } catch (e) {}
+      try {
+        const Ctx = window.AudioContext || window.webkitAudioContext;
+        if (!Ctx) return;
+        const ctx = acceptAudioCtx || (acceptAudioCtx = new Ctx());
+        if (ctx.state === 'suspended') ctx.resume().catch(function () {});
+        [0, 0.3].forEach(function (t) {
+          const o = ctx.createOscillator();
+          const g = ctx.createGain();
+          o.frequency.value = 880;
+          g.gain.setValueAtTime(0.2, ctx.currentTime + t);
+          g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + t + 0.25);
+          o.connect(g);
+          g.connect(ctx.destination);
+          o.start(ctx.currentTime + t);
+          o.stop(ctx.currentTime + t + 0.25);
+        });
+      } catch (e) {}
+    }
+
+    function acceptPendingLead(leadId, btn) {
+      if (!currentUser || currentUser.role !== 'Marketing') return;
+      if (btn) { btn.disabled = true; btn.textContent = 'Memproses...'; }
+      const ref = db.collection('leads').doc(leadId);
+      let accepted = null;
+      db.runTransaction(function (tx) {
+        return tx.get(ref).then(function (snap) {
+          if (!snap.exists) throw new Error('LEAD_MOVED');
+          const d = snap.data();
+          if (d.assignedTo !== currentUser.name) throw new Error('LEAD_MOVED');
+          accepted = Object.assign({ id: leadId }, d, { pendingAccept: false });
+          if (d.pendingAccept !== true) return;   // sudah diterima sebelumnya (mis. dari tab lain)
+          tx.update(ref, {
+            pendingAccept: false,
+            acceptedAt: FieldValue.serverTimestamp(),
+            acceptedBy: currentUser.name,
+            acceptedLate: Date.now() > acceptDeadlineMs(d)
+          });
+        });
+      }).then(function () {
+        logMarketingActivity('Terima lead', accepted.buyerName, leadId, '');
+        openAcceptedLeadModal(accepted);
+      }).catch(function (err) {
+        if (err && err.message === 'LEAD_MOVED') {
+          alert('Lead ini sudah dialihkan ke marketing lain karena melewati batas waktu 5 menit.');
+        } else {
+          const perm = err && (err.code === 'permission-denied' || /permission/i.test(err.message || ''));
+          alert('Gagal menerima lead: ' + (err && err.message) +
+            (perm ? '\n\nFirestore Rules belum mengizinkan marketing menyimpan status "diterima". Hubungi Super Admin.' : ''));
+        }
+        if (btn && document.body.contains(btn)) { btn.disabled = false; btn.textContent = 'Terima Lead'; }
+      });
+    }
+
+    // ---------- Kartu detail setelah lead diterima ----------
+    function openAcceptedLeadModal(lead) {
+      acceptedModalLead = lead;
+      const row = function (label, value) {
+        return '<div><p class="text-xs text-[var(--muted)]">' + label + '</p><p class="font-semibold text-sm mt-0.5 break-words">' + escapeHtml(value || '-') + '</p></div>';
+      };
+      document.getElementById('acceptedLeadModalBody').innerHTML =
+        '<p class="text-xs font-bold uppercase tracking-wide" style="color:#1f8a5c;">Lead diterima</p>' +
+        '<h3 class="font-bold text-lg mt-1">' + escapeHtml(lead.buyerName || '-') + '</h3>' +
+        '<div class="grid grid-cols-2 gap-3 mt-4">' +
+          row('No. WhatsApp', lead.waNumber) + row('Proyek', lead.project) +
+          row('Sumber', lead.adSource) + row('Status', lead.status) +
+        '</div>' +
+        '<div class="mt-3">' + row('Catatan dari CS', lead.csNote || 'Tidak ada catatan') + '</div>' +
+        '<button type="button" onclick="contactAcceptedLeadWa()" class="w-full inline-flex items-center justify-center gap-2 text-white font-semibold text-sm py-3 rounded-lg mt-5" style="background:#1f8a5c;">' +
+          ICON_WA.replace('fill="#1f8a5c"', 'fill="#fff"') + 'Hubungi via WA</button>' +
+        '<button type="button" onclick="closeAcceptedLeadModal()" class="cancel-btn w-full font-semibold text-sm py-2.5 rounded-lg mt-2">Tutup</button>';
+      const overlay = document.getElementById('acceptedLeadModalOverlay');
+      const box = document.getElementById('acceptedLeadModalBox');
+      overlay.classList.remove('hidden', 'pointer-events-none');
+      void overlay.offsetWidth;
+      overlay.style.opacity = '1';
+      box.style.opacity = '1';
+      box.style.transform = 'scale(1)';
+    }
+
+    function closeAcceptedLeadModal() {
+      const overlay = document.getElementById('acceptedLeadModalOverlay');
+      const box = document.getElementById('acceptedLeadModalBox');
+      acceptedModalLead = null;
+      if (!overlay || overlay.classList.contains('hidden')) return;
+      overlay.style.opacity = '0';
+      box.style.opacity = '0';
+      box.style.transform = 'scale(0.95)';
+      overlay.classList.add('pointer-events-none');
+      setTimeout(function () { if (!acceptedModalLead) overlay.classList.add('hidden'); }, 200);
+    }
+
+    // Buka chat WA ke buyer dengan sapaan otomatis.
+    function contactAcceptedLeadWa() {
+      const lead = acceptedModalLead;
+      if (!lead) return;
+      const project = lead.project || 'kami';
+      const message = 'Halo Bapak/Ibu ' + (lead.buyerName || '') + ', perkenalkan saya ' + (currentUser ? currentUser.name : '') +
+        ' dari ' + project + '. Terima kasih sudah menghubungi kami. Ada yang bisa saya bantu terkait informasi ' + project + '?';
+      window.open('https://wa.me/' + toWaDigits(lead.waNumber) + '?text=' + encodeURIComponent(message), '_blank');
+    }
+
+    // Hitung mundur diperbarui tiap detik tanpa me-render ulang kartu (supaya tombol tetap bisa ditekan).
+    // Saat sebuah lead baru saja lewat batas waktu, kartu/daftar di-render ulang sekali.
+    setInterval(function () {
+      if (!currentUser) return;
+      const now = Date.now();
+      let crossed = false;
+      document.querySelectorAll('[data-accept-deadline]').forEach(function (el) {
+        const left = Number(el.getAttribute('data-accept-deadline')) - now;
+        if (left > 0) el.textContent = formatCountdown(left);
+        else if (el.getAttribute('data-late') !== '1') crossed = true;
+      });
+      if (crossed) {
+        if (currentUser.role === 'Marketing') renderMarketingPending();
+        else renderPendingAcceptPanel();
+      }
+      if (isCsAdminRole(currentUser.role)) checkExpiredPendingLeads();
+    }, 1000);
+
     // ------------------------------------------------------------
     // Panel Marketing: pantauan real-time lead MILIK marketing yang login
     // ------------------------------------------------------------
@@ -4102,14 +4785,19 @@
       unsubscribeLeads = db.collection('leads')
         .where('assignedTo', '==', name)
         .onSnapshot(function (snapshot) {
-          marketingLeadsData = snapshot.docs.map(function (doc) {
+          const docs = snapshot.docs.map(function (doc) {
             const data = doc.data();
             return Object.assign({ id: doc.id }, data);
           });
+          // Lead yang belum ditekan "Terima" dipisah: tampil di kartu hitung mundur di atas, dan
+          // TIDAK masuk daftar/filter/ekspor/notifikasi biasa sampai diterima.
+          marketingPendingLeads = docs.filter(isPendingAccept);
+          marketingLeadsData = docs.filter(function (l) { return !isPendingAccept(l); });
           // Urutkan terbaru dulu di sisi klien (tanpa perlu composite index Firestore).
           marketingLeadsData.sort(function (a, b) {
             return toJsDate(b.createdAt) - toJsDate(a.createdAt);
           });
+          renderMarketingPending();
           renderMarketingCards();
           updateNotifBadge('marketing', marketingLeadsData);
           processRealtimeNotifications('marketing', marketingLeadsData);
@@ -4753,7 +5441,10 @@
     //   ditulis ke 'users/{uid}' oleh sesi Super Admin.
     // - "Hapus" akun = nonaktifkan (active:false): akun tidak bisa login dan ditolak
     //   Firestore Rules, tapi riwayatnya tetap utuh & bisa diaktifkan lagi kapan saja.
-    //   Menghapus akun login secara permanen butuh Cloud Functions (paket Blaze).
+    // - "Hapus Permanen" (hanya untuk akun yang SUDAH nonaktif): akun login Firebase dihapus
+    //   (login sebentar memakai password tersimpan di 'credentials', lalu user.delete()),
+    //   lead-nya dipindah/dihapus, lalu profil, password tersimpan, aktivitas, dan log
+    //   pengingatnya ikut dihapus sehingga namanya tidak muncul lagi di mana pun.
     // - Daftar proyek disimpan di settings/projects { list: [...] }.
     // ============================================================
     let manageModalOpen = false;
@@ -4899,6 +5590,7 @@
         return;
       }
       if (manageView === 'deactivate') { el.innerHTML = renderDeactivatePanel(); return; }
+      if (manageView === 'purge') { el.innerHTML = renderPurgePanel(); return; }
       if (manageView === 'created') { el.innerHTML = renderCreatedPanel(); return; }
       if (manageView === 'bulk') { el.innerHTML = renderBulkPanel(); return; }
       if (manageView === 'setPassword') { el.innerHTML = renderSetPasswordPanel(); return; }
@@ -4975,6 +5667,7 @@
         if (!isMe) buttons.push(manageBtn('Nonaktifkan', "startDeactivateUser('" + u.uid + "')", 'danger'));
       } else {
         buttons.push(manageBtn('Aktifkan Lagi', "reactivateUser('" + u.uid + "')", 'primary'));
+        if (!isMe) buttons.push(manageBtn('Hapus Permanen', "startPurgeUser('" + u.uid + "')", 'danger'));
       }
       return '<div class="border border-[var(--line)] rounded-xl px-3.5 py-3' + (active ? '' : ' bg-[#faf9f5]') + '">' +
         '<div class="flex flex-wrap items-start justify-between gap-2">' +
@@ -5655,6 +6348,172 @@
         .finally(function () { setManageBusy(false); renderManageModal(); });
     }
 
+    // ---------- Hapus permanen (khusus akun nonaktif) ----------
+    function startPurgeUser(uid) {
+      const u = findUserByUid(uid);
+      if (!isSuperAdminUser() || manageBusy || !u || uid === currentUser.uid) return;
+      if (isActiveUser(u)) { alert('Nonaktifkan akun ini dulu sebelum menghapus permanen.'); return; }
+      manageView = 'purge';
+      manageEditUid = uid;
+      manageNotice = '';
+      renderManageModal();
+    }
+
+    function renderPurgePanel() {
+      const u = findUserByUid(manageEditUid);
+      if (!u) { manageView = 'list'; return renderUserList(); }
+      const nm = escapeHtml(u.name || '(tanpa nama)');
+      const leads = allLeadsOf(u.name);
+      const targets = activeMarketingUsers().filter(function (x) { return x.uid !== u.uid; }).map(function (x) { return x.name; });
+      let leadField = '';
+      if (leads.length) {
+        const options = targets.map(function (n) { return '<option value="' + escapeHtml(n) + '">Pindahkan ke ' + escapeHtml(n) + '</option>'; }).join('') +
+          (targets.length > 1 ? '<option value="__spread__">Bagi rata ke semua marketing aktif</option>' : '') +
+          '<option value="__delete__">Hapus juga semua lead-nya (permanen)</option>';
+        leadField =
+          '<p class="text-sm text-[var(--muted)] mb-2">Masih ada <b class="text-[var(--ink)]">' + leads.length + ' lead</b> atas nama ' + nm +
+            ' (termasuk yang sudah Closed/Lost). Supaya namanya tidak muncul lagi di dashboard &amp; riwayat, lead tersebut harus dipindahkan atau dihapus.</p>' +
+          '<label class="field-label" for="purgeTarget">Lead milik ' + nm + '</label>' +
+          '<select id="purgeTarget" class="field-input mb-4">' + options + '</select>';
+      }
+      const noCred = !credentialsData[u.uid]
+        ? '<p class="text-xs mb-3 rounded-lg px-3 py-2" style="background:var(--red-bg);color:var(--red);">Password akun ini tidak tersimpan di aplikasi, jadi akun login-nya tidak bisa dihapus otomatis. ' +
+            'Data lainnya tetap dihapus; hapus akun login-nya manual di Firebase Console &gt; Authentication.</p>'
+        : '';
+      return '<h4 class="font-bold text-base mb-2">Hapus Permanen ' + nm + '</h4>' +
+        '<p class="text-sm text-[var(--muted)] mb-2">Yang akan dihapus dan <b class="text-[var(--ink)]">tidak bisa dikembalikan</b>:</p>' +
+        '<ul class="text-sm text-[var(--muted)] mb-3 list-disc pl-5 space-y-0.5">' +
+          '<li>Akun login (ID ' + escapeHtml(emailToId(u.email) || '-') + ') dan password tersimpannya</li>' +
+          '<li>Profil akun di daftar Kelola Akun</li>' +
+          '<li>Catatan &amp; riwayat aktivitas marketing</li>' +
+          '<li>Log pengingat WhatsApp yang dikirim ke ' + nm + '</li>' +
+        '</ul>' + noCred + leadField +
+        '<label class="field-label" for="purgeConfirm">Ketik <b>HAPUS</b> untuk konfirmasi</label>' +
+        '<input id="purgeConfirm" class="field-input mb-4" autocomplete="off" placeholder="HAPUS">' +
+        '<div class="flex items-center gap-3">' +
+          '<button type="button" onclick="manageBackToList()" class="cancel-btn font-semibold text-sm px-4 py-2.5 rounded-lg flex-1">Batal</button>' +
+          '<button type="button" id="purgeConfirmBtn" onclick="confirmPurgeFromPanel()" class="font-semibold text-sm px-4 py-2.5 rounded-lg flex-1" style="background:var(--red-bg); color:var(--red); border:1px solid rgba(163,53,44,0.25);">Hapus Permanen</button>' +
+        '</div>';
+    }
+
+    function confirmPurgeFromPanel() {
+      const u = findUserByUid(manageEditUid);
+      if (!u) { manageBackToList(); return; }
+      if (document.getElementById('purgeConfirm').value.trim().toUpperCase() !== 'HAPUS') {
+        alert('Ketik HAPUS untuk mengonfirmasi.');
+        return;
+      }
+      const sel = document.getElementById('purgeTarget');
+      purgeUser(u, sel ? sel.value : '');
+    }
+
+    // Jalankan operasi tulis dalam batch berisi maks. 400 dokumen.
+    function commitInChunks(items, applyFn) {
+      const chunks = [];
+      for (let i = 0; i < items.length; i += 400) chunks.push(items.slice(i, i + 400));
+      return chunks.reduce(function (prev, chunk) {
+        return prev.then(function () {
+          const batch = db.batch();
+          chunk.forEach(function (it) { applyFn(batch, it); });
+          return batch.commit();
+        });
+      }, Promise.resolve());
+    }
+
+    function deleteLoginAccount(u) {
+      const c = credentialsData[u.uid];
+      if (!c || !c.password) return Promise.resolve('no-credential');
+      const auth2 = getUserAdminAuth();
+      return auth2.setPersistence(firebase.auth.Auth.Persistence.NONE)
+        .then(function () { return auth2.signInWithEmailAndPassword(c.email || u.email, c.password); })
+        .then(function (cred) { return cred.user.delete(); })
+        .then(function () { return 'deleted'; })
+        .catch(function (err) {
+          const code = err && err.code;
+          if (code === 'auth/user-not-found') return 'deleted';   // sudah terhapus sebelumnya
+          if (code === 'auth/wrong-password' || code === 'auth/invalid-credential' || code === 'auth/invalid-login-credentials') return 'wrong-password';
+          throw err;
+        })
+        .finally(function () { return auth2.signOut().catch(function () {}); });
+    }
+
+    // target: nama marketing tujuan, '__spread__' = bagi rata, '__delete__' = hapus lead, '' = tidak ada lead.
+    // Setiap langkah aman diulang: kalau gagal di tengah, klik "Hapus Permanen" lagi untuk melanjutkan.
+    function purgeUser(u, target) {
+      if (!isSuperAdminUser() || manageBusy || isActiveUser(u)) return;
+      const leads = allLeadsOf(u.name);
+      const targets = activeMarketingUsers().filter(function (x) { return x.uid !== u.uid; }).map(function (x) { return x.name; });
+      if (leads.length && !target) { alert('Pilih dulu mau diapakan lead milik ' + u.name + '.'); return; }
+      if (leads.length && target !== '__delete__' && target !== '__spread__' && targets.indexOf(target) === -1) {
+        alert('Marketing tujuan tidak ditemukan.'); return;
+      }
+      if (target === '__spread__' && !targets.length) { alert('Tidak ada marketing aktif untuk menerima lead.'); return; }
+
+      let step = '';
+      let loginResult = '';
+      setManageBusy(true);
+      const btn = document.getElementById('purgeConfirmBtn');
+      if (btn) btn.textContent = 'Menghapus...';
+
+      step = 'memindahkan/menghapus lead';
+      commitInChunks(leads.map(function (l, i) { return { id: l.id, i: i }; }), function (batch, it) {
+        const ref = db.collection('leads').doc(it.id);
+        if (target === '__delete__') { batch.delete(ref); return; }
+        batch.update(ref, {
+          assignedTo: target === '__spread__' ? targets[it.i % targets.length] : target,
+          reassignedFrom: u.name,
+          reassignedAt: FieldValue.serverTimestamp()
+        });
+      })
+        .then(function () {
+          step = 'menghapus riwayat aktivitas';
+          const actRef = db.collection('marketingActivity').doc(u.uid);
+          return actRef.collection('logs').get().then(function (snap) {
+            return commitInChunks(snap.docs, function (batch, d) { batch.delete(d.ref); });
+          }).then(function () { return actRef.delete(); });
+        })
+        .then(function () {
+          step = 'menghapus log pengingat';
+          if (!u.name) return;
+          return db.collection('reminderLogs').where('marketingName', '==', u.name).get().then(function (snap) {
+            return commitInChunks(snap.docs, function (batch, d) { batch.delete(d.ref); });
+          });
+        })
+        .then(function () {
+          step = 'menghapus akun login';
+          return deleteLoginAccount(u).then(function (r) { loginResult = r; });
+        })
+        .then(function () {
+          step = 'menghapus profil akun';
+          const batch = db.batch();
+          batch.delete(db.collection('credentials').doc(u.uid));
+          batch.delete(db.collection('users').doc(u.uid));
+          return batch.commit();
+        })
+        .then(function () {
+          let msg = 'Akun ' + u.name + ' sudah dihapus permanen';
+          if (leads.length) msg += target === '__delete__' ? ' beserta ' + leads.length + ' lead-nya' : ' dan ' + leads.length + ' lead sudah dipindahkan';
+          msg += '.';
+          if (loginResult !== 'deleted') {
+            msg += ' Catatan: akun login-nya belum terhapus (' + (loginResult === 'wrong-password' ? 'password tersimpan tidak cocok' : 'password tidak tersimpan') +
+              ') — hapus manual di Firebase Console > Authentication. Akun itu tetap tidak bisa masuk aplikasi karena profilnya sudah tidak ada.';
+          }
+          manageNotice = msg;
+          manageView = 'list';
+          manageEditUid = null;
+        })
+        .catch(function (err) {
+          const perm = err && (err.code === 'permission-denied' || /permission/i.test(err.message || ''));
+          alert('Gagal ' + step + ': ' + (err && err.message) +
+            (perm ? '\n\nFirestore Rules belum mengizinkan Super Admin menghapus data ini. Pasang rules dari file firestore.rules di Firebase Console > Firestore Database > Rules, Publish, lalu klik Hapus Permanen lagi untuk melanjutkan.' :
+              '\n\nKlik Hapus Permanen lagi untuk melanjutkan dari langkah yang gagal.'));
+        })
+        .finally(function () {
+          setManageBusy(false);
+          renderManageModal();
+        });
+    }
+
     // ---------- Daftar proyek ----------
     function renderProjectsPanel() {
       const rows = projectList.map(function (p, i) {
@@ -5733,4 +6592,4 @@
   </script>
 
 </body>
-</html>
+</html>

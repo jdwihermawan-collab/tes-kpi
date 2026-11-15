@@ -1,0 +1,91 @@
+rules_version = '2';
+
+// ============================================================
+// Firestore Rules LENGKAP untuk Lead Tracker (CRM PRN).
+// Cara pasang: Firebase Console > Firestore Database > Rules >
+// hapus SEMUA isi lama > tempel seluruh file ini > Publish.
+//
+// Role (users/{uid}.role): 'SuperAdmin' | 'Admin' (SPV/Manager) | 'CS' | 'Marketing'
+// Akun nonaktif (active == false) tidak bisa membaca/menulis apa pun selain profilnya sendiri.
+// ============================================================
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() { return request.auth != null; }
+    function hasProfile() {
+      return signedIn() && exists(/databases/$(database)/documents/users/$(request.auth.uid));
+    }
+    function me() { return get(/databases/$(database)/documents/users/$(request.auth.uid)).data; }
+    function isActive() { return hasProfile() && me().get('active', true) != false; }
+    function isSuper() { return isActive() && me().role == 'SuperAdmin'; }
+    function isStaff() { return isActive() && me().role in ['CS', 'Admin', 'SuperAdmin']; }
+    function isMarketing() { return isActive() && me().role == 'Marketing'; }
+    function myName() { return me().name; }
+    function isSelf(uid) { return signedIn() && request.auth.uid == uid; }
+
+    // ---------- Profil akun ----------
+    match /users/{uid} {
+      // Setiap akun boleh membaca profilnya sendiri (dipakai saat login, termasuk
+      // untuk menampilkan pesan "akun dinonaktifkan"). CS/SPV/Super Admin membaca semua.
+      allow read: if isSelf(uid) || isStaff();
+      allow create, update: if isSuper();
+      allow delete: if isSuper() && !isSelf(uid);   // Hapus Permanen
+    }
+
+    // ---------- Password tersimpan (khusus Super Admin) ----------
+    match /credentials/{uid} {
+      allow read, write: if isSuper();
+    }
+
+    // ---------- Pengaturan: settings/projects & settings/adRotation ----------
+    match /settings/{docId} {
+      allow read: if isActive();
+      allow write: if isSuper() || (isStaff() && docId == 'adRotation');
+    }
+
+    // ---------- Lead ----------
+    match /leads/{leadId} {
+      // CS / SPV / Super Admin: akses penuh (input, pengalihan "Terima Lead", hapus).
+      allow read, create, update, delete: if isStaff();
+
+      // Marketing: hanya lead miliknya sendiri, dan tidak boleh memindahkan lead ke orang lain.
+      allow read: if isMarketing() && resource.data.assignedTo == myName();
+      allow create: if isMarketing() && request.resource.data.assignedTo == myName();
+      allow update: if isMarketing()
+        && resource.data.assignedTo == myName()
+        && request.resource.data.assignedTo == myName();
+      allow delete: if isMarketing() && resource.data.assignedTo == myName();
+    }
+
+    // ---------- Indeks nomor WA (cek duplikat lintas tim) ----------
+    match /waIndex/{waDigits} {
+      allow read, write: if isActive();
+    }
+
+    // ---------- Aktivitas marketing ----------
+    match /marketingActivity/{uid} {
+      allow read: if isStaff() || isSelf(uid);
+      allow create, update: if isMarketing() && isSelf(uid);
+      allow delete: if isSuper();                   // Hapus Permanen
+
+      match /logs/{logId} {
+        allow read: if isStaff() || isSelf(uid);
+        allow create: if isMarketing() && isSelf(uid);
+        allow delete: if isSuper();                 // Hapus Permanen
+      }
+    }
+
+    // ---------- Log pengingat WA ----------
+    match /reminderLogs/{logId} {
+      allow read, create: if isStaff();
+      allow delete: if isSuper();                   // Hapus Permanen
+    }
+
+    // ---------- Token Push Notification ----------
+    // Server (api/send-push.js) memakai Admin SDK sehingga tidak terpengaruh rules ini.
+    match /pushTokens/{uid} {
+      allow read, write: if isSelf(uid) && isActive();
+      allow read: if isSuper();
+    }
+  }
+}
