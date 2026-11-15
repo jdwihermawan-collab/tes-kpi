@@ -1145,7 +1145,7 @@
             Export PDF
           </button>
           <div id="marketingSelectToggleWrap">
-            <button type="button" onclick="enterSelectMode()" class="cancel-btn font-semibold text-xs px-3 py-1.5 rounded-lg">
+            <button type="button" onclick="enterSelectMode()" class="cancel-btn font-semibold text-xs px-3 py-1.5 rounded-lg" title="Pilih lead Input Mandiri milikmu untuk dihapus">
               Pilih
             </button>
           </div>
@@ -4911,7 +4911,19 @@
       renderMarketingCards();
     }
 
+    // Marketing hanya boleh menghapus lead Input Mandiri miliknya sendiri (dijaga juga oleh Firestore Rules).
+    function isDeletableByMarketing(lead) {
+      return !!lead && lead.isSelfInput === true;
+    }
+
     function toggleLeadSelection(leadId) {
+      if (!marketingSelectedIds.has(leadId)) {
+        const lead = marketingLeadsData.find(function (l) { return l.id === leadId; });
+        if (!isDeletableByMarketing(lead)) {
+          alert('Lead dari CS tidak bisa dihapus. Kalau lead ini tidak jadi, ubah statusnya ke "Lost (Batal)".\n\nYang bisa dihapus hanya lead Input Mandiri milikmu sendiri.');
+          return;
+        }
+      }
       if (marketingSelectedIds.has(leadId)) marketingSelectedIds.delete(leadId);
       else marketingSelectedIds.add(leadId);
       renderMarketingCards();
@@ -4941,7 +4953,7 @@
     // marketingLeadsData sudah otomatis berisi lead miliknya saja (query assignedTo == nama),
     // dan divalidasi ulang di sini sebagai lapisan keamanan tambahan.
     function confirmBulkDeleteLeads() {
-      const ownIds = new Set(marketingLeadsData.map(function (l) { return l.id; }));
+      const ownIds = new Set(marketingLeadsData.filter(isDeletableByMarketing).map(function (l) { return l.id; }));
       const ids = Array.from(marketingSelectedIds).filter(function (id) { return ownIds.has(id); });
       if (!ids.length) return;
 
