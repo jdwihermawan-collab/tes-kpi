@@ -7,11 +7,11 @@
 //     acceptExhausted (tanpa push).
 //  2. Lead yang tinggal <= 1 menit -> push "Sisa 1 menit" ke pemegangnya (sekali).
 //  3. Cadangan: lead baru yang push "lead masuk"-nya belum terkirim -> dikirim.
-//  4. Setiap hari jam 08:00 WIB -> push ringkasan follow-up hari ini ke tiap marketing.
+//  4. Setiap hari jam 09:00 WIB -> push ringkasan follow-up hari ini ke tiap marketing.
 //
 // Environment Variable di Vercel:
 //   CRON_SECRET = kata sandi bebas (acak & panjang), sama dengan ?key= di cron-job.org
-//   DAILY_REMINDER_HOUR (opsional) = jam pengingat harian WIB, default 8
+//   DAILY_REMINDER_HOUR (opsional) = jam pengingat harian WIB, default 9
 // ============================================================
 const L = require('./_lib');
 
@@ -76,7 +76,7 @@ async function reassignOrWarn(doc, pool, users, link, now, out) {
 
 // 4. Ringkasan follow-up harian (sekali sehari, dicatat di settings/pushDaily).
 async function dailyReminder(users, link, now, out) {
-  const hour = Number(process.env.DAILY_REMINDER_HOUR || 8);
+  const hour = Number(process.env.DAILY_REMINDER_HOUR || 9);
   const t = L.wibParts(now);
   if (t.hour !== hour) return;
   const flagRef = L.db().collection('settings').doc('pushDaily');
