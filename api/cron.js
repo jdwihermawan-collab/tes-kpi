@@ -4,16 +4,38 @@
 // Tugas:
 //  1. Lead menunggu diterima yang lewat 5 menit -> dialihkan ke marketing berikutnya
 //     di rotasi + push "Lead dialihkan ke kamu". Kalau semua sudah dilewati, ditandai
-//     acceptExhausted (tanpa push).
-//  2. Lead yang tinggal <= 1 menit -> push "Sisa 1 menit" ke pemegangnya (sekali).
+//     acceptExhausted dan CS + SPV diberi tahu lewat push (sekali per lead).
+//  2. Lead yang tinggal <= 90 detik -> push "Sisa 1 menit" ke pemegangnya (sekali).
+//     Jendelanya 90 detik (bukan 60) supaya tidak terlewat kalau cron telat beberapa detik.
 //  3. Cadangan: lead baru yang push "lead masuk"-nya belum terkirim -> dikirim.
 //  4. Setiap hari jam 09:00 WIB -> push ringkasan follow-up hari ini ke tiap marketing.
+//
+// Hemat kuota Firestore: data akun (koleksi users) hanya dibaca kalau ada lead yang
+// menunggu diterima, atau saat pengingat harian benar-benar dikirim. Kalau tidak ada
+// apa-apa, satu panggilan cron hanya memakai 1 kali baca.
 //
 // Environment Variable di Vercel:
 //   CRON_SECRET = kata sandi bebas (acak & panjang), sama dengan ?key= di cron-job.org
 //   DAILY_REMINDER_HOUR (opsional) = jam pengingat harian WIB, default 9
 // ============================================================
 const L = require('./_lib');
+
+const WARN_WINDOW_MS = 90 * 1000;
+
+// Lead sudah dilewatkan ke semua marketing: beri tahu CS & SPV/Manager (sekali per lead).
+async function notifyExhausted(ref, lead, users, link, out) {
+  if ((lead.pushKeys || []).indexOf('exhausted') !== -1) return;
+  if (!(await L.claimPushKey(ref, 'exhausted'))) return;
+  const staffUids = users.filter(function (u) { return u.role === 'CS' || u.role === 'Admin'; })
+    .map(function (u) { return u.uid; });
+  await L.sendToUids(staffUids, {
+    kind: 'lead-exhausted', leadId: lead.id, link: link, sticky: true, tag: 'exhausted-' + lead.id,
+    title: 'Lead belum diterima siapa pun',
+    body: (lead.buyerName || '-') + ' (' + (lead.project || '-') + ') sudah dilewatkan ke semua marketing. ' +
+      'Sekarang dipegang ' + (lead.assignedTo || '-') + '. Buka CRM untuk menindaklanjuti.'
+  });
+  out.escalated++;
+}
 
 async function reassignOrWarn(doc, pool, users, link, now, out) {
   const ref = doc.ref;
@@ -31,7 +53,7 @@ async function reassignOrWarn(doc, pool, users, link, now, out) {
 
   // 2. Peringatan sisa 1 menit.
   const warnKey = 'warn-' + (lead.reassignCount || 0);
-  if (deadline > now && deadline - now <= 60 * 1000 && (lead.pushKeys || []).indexOf(warnKey) === -1) {
+  if (deadline > now && deadline - now <= WARN_WINDOW_MS && (lead.pushKeys || []).indexOf(warnKey) === -1) {
     if (await L.claimPushKey(ref, warnKey)) {
       await L.sendToUids(L.uidsByName(users, lead.assignedTo, 'Marketing'), L.msgLeadWarn(lead, link));
       out.warned++;
@@ -39,8 +61,14 @@ async function reassignOrWarn(doc, pool, users, link, now, out) {
     return;
   }
 
+  // Sudah melewati semua marketing (ditandai server atau panel CS): pastikan CS & SPV tahu.
+  if (lead.acceptExhausted) {
+    await notifyExhausted(ref, lead, users, link, out);
+    return;
+  }
+
   // 1. Pengalihan.
-  if (lead.acceptExhausted || deadline > now) return;
+  if (deadline > now) return;
   let moved = null;
   await L.db().runTransaction(async function (tx) {
     moved = null;
@@ -71,11 +99,13 @@ async function reassignOrWarn(doc, pool, users, link, now, out) {
     }
   } else if (moved && moved.exhausted) {
     out.exhausted++;
+    await notifyExhausted(ref, lead, users, link, out);
   }
 }
 
 // 4. Ringkasan follow-up harian (sekali sehari, dicatat di settings/pushDaily).
-async function dailyReminder(users, link, now, out) {
+//    loadUsers dipanggil hanya setelah dipastikan hari ini belum dikirim.
+async function dailyReminder(loadUsers, link, now, out) {
   const hour = Number(process.env.DAILY_REMINDER_HOUR || 9);
   const t = L.wibParts(now);
   if (t.hour !== hour) return;
@@ -88,6 +118,7 @@ async function dailyReminder(users, link, now, out) {
   });
   if (!go) return;
 
+  const users = await loadUsers();
   const leads = (await L.db().collection('leads').get()).docs.map(function (d) { return d.data(); });
   const todayKey = t.dateKey;
   const counts = {};
@@ -124,18 +155,27 @@ module.exports = async function handler(req, res) {
 
   const now = Date.now();
   const link = L.baseUrl(req);
-  const out = { pending: 0, created: 0, warned: 0, reassigned: 0, exhausted: 0, daily: 0, errors: [] };
-  const users = await L.activeUsers();
-  const pool = L.rotationPool(users);
+  const out = { pending: 0, created: 0, warned: 0, reassigned: 0, exhausted: 0, escalated: 0, daily: 0, errors: [] };
+
+  // Data akun dibaca sekali saja per panggilan, dan hanya kalau memang dibutuhkan.
+  let usersPromise = null;
+  function loadUsers() {
+    if (!usersPromise) usersPromise = L.activeUsers();
+    return usersPromise;
+  }
 
   const pending = await L.db().collection('leads').where('pendingAccept', '==', true).get();
   out.pending = pending.size;
-  for (const doc of pending.docs) {
-    try { await reassignOrWarn(doc, pool, users, link, now, out); }
-    catch (e) { out.errors.push(doc.id + ': ' + e.message); }
+  if (pending.size) {
+    const users = await loadUsers();
+    const pool = L.rotationPool(users);
+    for (const doc of pending.docs) {
+      try { await reassignOrWarn(doc, pool, users, link, now, out); }
+      catch (e) { out.errors.push(doc.id + ': ' + e.message); }
+    }
   }
 
-  try { await dailyReminder(users, link, now, out); }
+  try { await dailyReminder(loadUsers, link, now, out); }
   catch (e) { out.errors.push('daily: ' + e.message); }
 
   return res.json(out);
