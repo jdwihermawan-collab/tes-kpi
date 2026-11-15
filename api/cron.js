@@ -119,7 +119,10 @@ async function dailyReminder(loadUsers, link, now, out) {
   if (!go) return;
 
   const users = await loadUsers();
-  const leads = (await L.db().collection('leads').get()).docs.map(function (d) { return d.data(); });
+  // Hanya lead aktif (belum Closed/Lost) yang dibaca, supaya pemakaian kuota tidak ikut
+  // membesar seiring bertambahnya lead lama yang sudah selesai.
+  const leads = (await L.db().collection('leads').where('status', 'not-in', L.CLOSED_STATUSES).get())
+    .docs.map(function (d) { return d.data(); });
   const todayKey = t.dateKey;
   const counts = {};
   leads.forEach(function (l) {
