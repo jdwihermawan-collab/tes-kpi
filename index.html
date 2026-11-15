@@ -872,7 +872,7 @@
       <section id="pendingAcceptSection" class="hidden bg-[var(--card)] border border-[var(--line)] rounded-2xl p-5 sm:p-7">
         <div class="mb-4">
           <h2 class="text-lg font-bold">Menunggu Diterima Marketing</h2>
-          <p class="text-sm text-[var(--muted)] mt-0.5">Marketing wajib menekan Terima dalam 5 menit. Lewat dari itu, lead otomatis dialihkan ke marketing berikutnya selama halaman ini terbuka. Tekan <b>Beritahu WA</b> setiap kali lead pindah marketing.</p>
+          <p class="text-sm text-[var(--muted)] mt-0.5">Marketing wajib menekan Terima dalam 5 menit. Lewat dari itu, lead otomatis dialihkan ke marketing berikutnya dan notif otomatis terkirim ke HP-nya. <b>Beritahu WA</b> hanya cadangan kalau marketing belum mengaktifkan notifikasi.</p>
         </div>
         <div id="pendingAcceptList" class="space-y-2.5"></div>
         <div id="recentAcceptWrap" class="hidden mt-5">
@@ -4153,6 +4153,7 @@
         }
 
         savePromise.then(function () {
+          callNotify('lead-created', newLeadRef.id);
           leadForm.reset();
           if (csInputMode === 'iklan') {
             document.getElementById('assignedTo').removeAttribute('required');
@@ -4237,6 +4238,9 @@
           pushOnMessageBound = true;
           // Saat aplikasi sedang terbuka, FCM tidak menampilkan notifikasi sistem: tampilkan sendiri.
           pushMessaging.onMessage(function (payload) {
+            const kind = (payload.data && payload.data.kind) || '';
+            // Lead menunggu diterima sudah tampil sebagai kartu hitung mundur (dengan bunyi) saat aplikasi terbuka.
+            if (kind === 'lead-pending' || kind === 'lead-warn') return;
             const n = payload.notification || payload.data || {};
             const title = n.title || 'Notifikasi';
             const body = n.body || '';
@@ -4316,6 +4320,21 @@
     function initPushForCurrentUser() {
       renderPushBanner();
       if ('Notification' in window && Notification.permission === 'granted') registerPushToken();
+    }
+
+    // Minta server mengirim push untuk sebuah kejadian lead (lihat api/notify.js).
+    // Tidak memblokir apa pun: kalau gagal, cron di server tetap mengirim notif lead masuk & pengalihan.
+    function callNotify(event, leadId) {
+      if (!auth.currentUser || !leadId) return;
+      auth.currentUser.getIdToken().then(function (idToken) {
+        return fetch('/api/notify', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + idToken },
+          body: JSON.stringify({ event: event, leadId: leadId })
+        });
+      }).then(function (r) {
+        if (!r.ok) console.warn('Push ' + event + ' gagal: HTTP ' + r.status);
+      }).catch(function (err) { console.warn('Push ' + event + ' gagal:', err); });
     }
 
     // ---------- Super Admin: Tes Push ----------
@@ -4584,8 +4603,9 @@
         });
       }).then(function () {
         if (result && result.to) {
+          callNotify('lead-reassigned', leadId);
           addNotification('csAdmin', 'followup', 'Lead dialihkan ke ' + result.to,
-            (result.d.buyerName || 'Lead') + ': ' + result.from + ' tidak menerima. Tekan Beritahu WA untuk ' + result.to + '.', leadId);
+            (result.d.buyerName || 'Lead') + ': ' + result.from + ' tidak menerima. Notif otomatis dikirim ke HP ' + result.to + '.', leadId);
         } else if (result && result.exhausted && force) {
           alert('Tidak ada marketing lain di rotasi yang belum dilewati lead ini.');
         }
@@ -4698,6 +4718,7 @@
         });
       }).then(function () {
         logMarketingActivity('Terima lead', accepted.buyerName, leadId, '');
+        callNotify('lead-accepted', leadId);
         openAcceptedLeadModal(accepted);
       }).catch(function (err) {
         if (err && err.message === 'LEAD_MOVED') {
