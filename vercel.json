@@ -1,0 +1,5 @@
+{
+  "redirects": [
+    { "source": "/firestore.rules", "destination": "/", "permanent": false }
+  ]
+}
