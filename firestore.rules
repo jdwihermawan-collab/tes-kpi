@@ -48,18 +48,28 @@ service cloud.firestore {
       // CS / SPV / Super Admin: akses penuh (input, pengalihan "Terima Lead", hapus).
       allow read, create, update, delete: if isStaff();
 
-      // Marketing: hanya lead miliknya sendiri, dan tidak boleh memindahkan lead ke orang lain.
+      // Marketing: hanya lead miliknya sendiri, tidak boleh memindahkan lead ke orang lain,
+      // dan tidak boleh mengubah penanda isSelfInput (penanda lead Input Mandiri).
       allow read: if isMarketing() && resource.data.assignedTo == myName();
       allow create: if isMarketing() && request.resource.data.assignedTo == myName();
       allow update: if isMarketing()
         && resource.data.assignedTo == myName()
-        && request.resource.data.assignedTo == myName();
-      allow delete: if isMarketing() && resource.data.assignedTo == myName();
+        && request.resource.data.assignedTo == myName()
+        && request.resource.data.get('isSelfInput', false) == resource.data.get('isSelfInput', false);
+      // Marketing hanya boleh menghapus lead Input Mandiri miliknya sendiri.
+      // Lead dari CS / iklan tidak bisa dihapus marketing (ubah status ke "Lost (Batal)").
+      allow delete: if isMarketing()
+        && resource.data.assignedTo == myName()
+        && resource.data.get('isSelfInput', false) == true;
     }
 
     // ---------- Indeks nomor WA (cek duplikat lintas tim) ----------
+    // Semua akun aktif boleh mengecek SATU nomor (get) dan mencatat lead-nya sendiri.
+    // Melihat seluruh daftar nomor (list) dan menghapus entri hanya untuk CS/SPV/Super Admin.
     match /waIndex/{waDigits} {
-      allow read, write: if isActive();
+      allow get: if isActive();
+      allow create, update: if isActive();
+      allow list, delete: if isStaff();
     }
 
     // ---------- Aktivitas marketing ----------
