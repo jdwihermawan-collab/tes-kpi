@@ -886,6 +886,7 @@
         <div class="mb-1">
           <h2 class="text-lg font-bold">Pantauan Semua Lead (Global)</h2>
           <p class="text-sm text-[var(--muted)] mt-0.5">Kinerja tiap marketing, untuk memantau batas waktu follow-up 3 hari.</p>
+          <p class="leads-scope-bar text-xs text-[var(--muted)] mt-1.5"></p>
         </div>
 
         <!-- Mode 1: Grid kartu ringkasan per marketing (di-generate JS dari data real-time Firestore) -->
@@ -1136,6 +1137,8 @@
         </div>
       </div>
 
+      <p class="leads-scope-bar text-xs text-[var(--muted)]"></p>
+
       <!-- Mode "Pilih": tombol untuk masuk mode pilih, lalu bar aksi Hapus/Batal saat mode aktif -->
       <div class="flex items-center justify-between gap-2">
         <p class="text-sm text-[var(--muted)]">Daftar lead kamu</p>
@@ -1310,7 +1313,8 @@
 
       <div id="riwayatTypeWrap" class="flex flex-wrap gap-1.5 mb-3"></div>
 
-      <p id="riwayatSummary" class="text-sm font-semibold text-[var(--brand-dark)] mb-3"></p>
+      <p id="riwayatSummary" class="text-sm font-semibold text-[var(--brand-dark)] mb-1"></p>
+      <p class="leads-scope-bar text-xs text-[var(--muted)] mb-3"></p>
       <div id="riwayatList" class="space-y-2"></div>
     </div>
   </div>
@@ -2389,13 +2393,16 @@
         '\n\nYakin ingin menyimpan sebagai lead baru?';
     }
 
-    // Penyelarasan waIndex oleh akun CS/Admin (yang memegang data semua lead): dihitung ulang dari
-    // allLeadsData setiap snapshot, lalu hanya dokumen yang berbeda yang ditulis/dihapus. Ini sekaligus
-    // mengisi indeks untuk lead lama dan memperbaiki entri yang terlewat dari sisi Marketing.
-    let waIndexCache = null;          // { nomor: JSON ringkasan leads } sesuai isi Firestore
-    let waIndexSyncBusy = false;
-    let waIndexSyncPending = false;
-    let waIndexSyncFailed = false;
+    // Penyelarasan waIndex oleh akun CS/Admin, versi HEMAT BACA (tidak lagi membaca seluruh koleksi
+    // waIndex setiap panel dibuka, yang dulu memakan 1 baca per nomor WA):
+    //  - Data pertama setelah panel dibuka: hanya lead yang tersentuh 3 hari terakhir (baru masuk,
+    //    di-update, dialihkan server, diterima) yang dicek ke waIndex (1 baca per nomor). Lead lain
+    //    dianggap sudah sinkron.
+    //  - Perubahan berikutnya: hanya lead yang berubah yang ditulis ulang, dan hanya kalau ringkasannya
+    //    benar-benar berubah.
+    //  - Lead yang DIHAPUS dibersihkan langsung di tempat penghapusannya (waIndexRemove).
+    const WA_INDEX_RECHECK_MS = 3 * 24 * 3600 * 1000;
+    let waIndexKnown = {};            // leadId -> { d: nomor, json: ringkasan } yang diyakini sudah ada di waIndex
 
     function stableJson(obj) {
       if (obj === null || typeof obj !== 'object') return JSON.stringify(obj);
@@ -2404,59 +2411,90 @@
       }).join(',') + '}';
     }
 
-    function syncWaIndex() {
-      if (waIndexSyncFailed) return;
-      if (waIndexSyncBusy) { waIndexSyncPending = true; return; }
-      waIndexSyncBusy = true;
+    function tsMs(v) {
+      if (!v) return 0;
+      const t = toJsDate(v).getTime();
+      return isNaN(t) ? 0 : t;
+    }
 
-      const loadCache = waIndexCache ? Promise.resolve() : db.collection('waIndex').get().then(function (snap) {
-        waIndexCache = {};
-        snap.docs.forEach(function (doc) { waIndexCache[doc.id] = stableJson((doc.data() || {}).leads || {}); });
-      });
+    // Kapan terakhir lead ini disentuh (dibuat, di-update, dialihkan, atau diterima).
+    function leadTouchedMs(l) {
+      return Math.max(tsMs(l.createdAt), tsMs(l.lastUpdated), tsMs(l.lastReassignAt), tsMs(l.reassignedAt), tsMs(l.acceptedAt));
+    }
 
-      loadCache.then(function () {
-        const desired = {};
+    function waIndexWrite(leadId, lead, d) {
+      const leads = {};
+      leads[leadId] = waIndexEntry(lead);
+      return db.collection('waIndex').doc(d).set({ leads: leads }, { merge: true })
+        .catch(function (err) { console.error('Gagal memperbarui waIndex:', err); });
+    }
+
+    function syncWaIndex(changedIds, isInitial) {
+      if (isInitial) {
+        waIndexKnown = {};
+        const now = Date.now();
+        const recheck = {};   // nomor -> [lead yang perlu dicek ke server]
         allLeadsData.forEach(function (l) {
-          if (!l.waNumber) return;
-          const d = toWaDigits(l.waNumber);
+          const d = l.waNumber ? toWaDigits(l.waNumber) : '';
           if (!d) return;
-          (desired[d] = desired[d] || {})[l.id] = waIndexEntry(l);
+          if (now - leadTouchedMs(l) <= WA_INDEX_RECHECK_MS) (recheck[d] = recheck[d] || []).push(l);
+          else waIndexKnown[l.id] = { d: d, json: stableJson(waIndexEntry(l)) };
         });
-
-        const ops = [];
-        Object.keys(desired).forEach(function (d) {
-          const json = stableJson(desired[d]);
-          if (waIndexCache[d] !== json) ops.push({ d: d, leads: desired[d], json: json });
-        });
-        Object.keys(waIndexCache).forEach(function (d) {
-          if (!desired[d]) ops.push({ d: d, leads: null });
-        });
-        if (!ops.length) return;
-
-        const chunks = [];
-        for (let i = 0; i < ops.length; i += 400) chunks.push(ops.slice(i, i + 400));
-        return chunks.reduce(function (prev, chunk) {
-          return prev.then(function () {
-            const batch = db.batch();
-            chunk.forEach(function (op) {
-              const ref = db.collection('waIndex').doc(op.d);
-              if (op.leads) batch.set(ref, { leads: op.leads });
-              else batch.delete(ref);
+        Object.keys(recheck).forEach(function (d) {
+          db.collection('waIndex').doc(d).get().then(function (snap) {
+            const stored = (snap.exists && snap.data().leads) || {};
+            const patch = {};
+            recheck[d].forEach(function (l) {
+              const entry = waIndexEntry(l);
+              const json = stableJson(entry);
+              if (stableJson(stored[l.id] || null) !== json) patch[l.id] = entry;
+              waIndexKnown[l.id] = { d: d, json: json };
             });
-            return batch.commit().then(function () {
-              chunk.forEach(function (op) {
-                if (op.leads) waIndexCache[op.d] = op.json;
-                else delete waIndexCache[op.d];
-              });
-            });
+            if (Object.keys(patch).length) return db.collection('waIndex').doc(d).set({ leads: patch }, { merge: true });
+          }).catch(function (err) { console.error('Gagal mengecek waIndex:', err); });
+        });
+        return;
+      }
+
+      const byId = {};
+      allLeadsData.forEach(function (l) { byId[l.id] = l; });
+      (changedIds || []).forEach(function (id) {
+        const l = byId[id];
+        if (!l) return;   // lead keluar dari data yang dimuat (mis. Closed lama): indeksnya dibiarkan
+        const d = l.waNumber ? toWaDigits(l.waNumber) : '';
+        const known = waIndexKnown[id];
+        const json = d ? stableJson(waIndexEntry(l)) : '';
+        if (known && known.d === d && known.json === json) return;
+        if (known && known.d && known.d !== d) waIndexRemove(id, known.d);   // nomor WA lead diganti
+        if (d) {
+          waIndexWrite(id, l, d);
+          waIndexKnown[id] = { d: d, json: json };
+        } else {
+          delete waIndexKnown[id];
+        }
+      });
+    }
+
+    // Cek nomor ke indeks waIndex (1 baca), lalu ambil data lead-nya untuk pesan peringatan.
+    // Dipakai panel CS kalau nomor itu tidak ada di data yang sedang dimuat (mode hemat tidak
+    // memuat lead Closed/Lost lama). Entri basi (lead-nya sudah dihapus) sekalian dibersihkan.
+    function findDuplicateInWaIndex(raw) {
+      const d = toWaDigits(raw);
+      if (!d) return Promise.resolve(null);
+      return db.collection('waIndex').doc(d).get().then(function (snap) {
+        const ids = Object.keys((snap.exists && snap.data().leads) || {});
+        function tryAt(i) {
+          if (i >= ids.length) return null;
+          return db.collection('leads').doc(ids[i]).get().then(function (ls) {
+            if (ls.exists) return Object.assign({ id: ls.id }, ls.data());
+            waIndexRemove(ids[i], d);
+            return tryAt(i + 1);
           });
-        }, Promise.resolve());
+        }
+        return tryAt(0);
       }).catch(function (err) {
-        waIndexSyncFailed = true;   // mis. rules waIndex belum dipasang; berhenti sampai halaman dimuat ulang
-        console.error('Gagal menyelaraskan waIndex:', err);
-      }).then(function () {
-        waIndexSyncBusy = false;
-        if (waIndexSyncPending) { waIndexSyncPending = false; syncWaIndex(); }
+        console.error('Gagal mengecek nomor ke indeks:', err);
+        return null;
       });
     }
 
@@ -3748,6 +3786,10 @@
       if (activityLogModalOpen) closeActivityLogModal();
       adRotationCounter = null;
       allLeadsData = [];
+      leadsLoadMode = 'hemat';          // setiap sesi login mulai lagi dari mode hemat kuota
+      allLeadsReady = false;
+      leadsHematUnavailable = false;
+      waIndexKnown = {};
       marketingLeadsData = [];
       marketingPendingLeads = [];
       knownPendingIds = null;
@@ -3775,7 +3817,111 @@
     }
 
     // ------------------------------------------------------------
-    // Panel CS/Admin: pantauan real-time SEMUA lead via onSnapshot
+    // HEMAT KUOTA BACA FIRESTORE (paket gratis: 50.000 baca/hari).
+    // Setiap kali panel dibuka, Firestore menghitung 1 baca per lead yang dimuat. Supaya tidak
+    // membengkak seiring bertambahnya lead, panel memakai dua mode:
+    //   'hemat' (default): lead AKTIF (belum Closed/Lost) + lead yang MASUK 90 hari terakhir.
+    //   'semua'          : seluruh lead, termasuk Closed/Lost lama. Dipakai saat butuh data lama
+    //                      (tombol "Tampilkan semua lead", dan otomatis saat Super Admin membuka Kelola Akun).
+    // Mode kembali ke 'hemat' setiap login / muat ulang halaman.
+    // ------------------------------------------------------------
+    const LEADS_WINDOW_DAYS = 90;
+    const ACTIVE_LEAD_STATUSES = ['New', 'Awal Chat', 'Follow-Up 1', 'Follow-Up 2', 'Follow-Up 3', 'Site Visit', 'Lain-lain'];
+    let leadsLoadMode = 'hemat';
+    let allLeadsReady = false;        // true setelah data mode 'semua' selesai dimuat
+    let leadsHematUnavailable = false; // true kalau query mode hemat gagal (mis. indeks Firestore belum dibuat)
+
+    function leadsWindowStart() {
+      return firebase.firestore.Timestamp.fromMillis(Date.now() - LEADS_WINDOW_DAYS * 24 * 3600 * 1000);
+    }
+
+    function leadCreatedMs(l) {
+      return l && l.createdAt ? toJsDate(l.createdAt).getTime() : Date.now();
+    }
+
+    // Pasang beberapa query lead sekaligus dan gabungkan hasilnya (tanpa duplikat).
+    // onData(leads, changedIds, isInitial) baru dipanggil setelah SEMUA query mengirim data pertamanya,
+    // supaya notifikasi "lead baru" tidak salah menyala untuk lead lama.
+    // onError(err) dipanggil sekali kalau salah satu query gagal. Mengembalikan fungsi untuk berhenti.
+    function listenLeadQueries(queries, onData, onError) {
+      const keys = Object.keys(queries);
+      const latest = new Map();       // id -> data lead terbaru
+      const members = {};             // nama query -> Set id yang cocok dengan query itu
+      const ready = {};
+      let initialSent = false;
+      let changedSince = new Set();
+      let stopped = false;
+      const unsubs = keys.map(function (key) {
+        members[key] = new Set();
+        return queries[key].onSnapshot(function (snapshot) {
+          if (stopped) return;
+          snapshot.docChanges().forEach(function (ch) {
+            const id = ch.doc.id;
+            if (ch.type === 'removed') {
+              members[key].delete(id);
+              if (!keys.some(function (k) { return members[k].has(id); })) latest.delete(id);
+            } else {
+              members[key].add(id);
+              latest.set(id, Object.assign({ id: id }, ch.doc.data()));
+            }
+            changedSince.add(id);
+          });
+          ready[key] = true;
+          if (!keys.every(function (k) { return ready[k]; })) return;
+          const isInitial = !initialSent;
+          initialSent = true;
+          const changed = isInitial ? [] : Array.from(changedSince);
+          changedSince = new Set();
+          onData(Array.from(latest.values()), changed, isInitial);
+        }, function (err) {
+          if (stopped) return;
+          stopped = true;
+          unsubs.forEach(function (u) { try { u(); } catch (e) {} });
+          if (onError) onError(err);
+        });
+      });
+      return function stop() {
+        stopped = true;
+        unsubs.forEach(function (u) { try { u(); } catch (e) {} });
+      };
+    }
+
+    function setLeadsLoadMode(mode) {
+      if (!currentUser || (mode !== 'hemat' && mode !== 'semua') || mode === leadsLoadMode) return;
+      if (mode === 'hemat' && (manageModalOpen || leadsHematUnavailable)) return;   // Kelola Akun butuh data lengkap
+      leadsLoadMode = mode;
+      allLeadsReady = false;
+      if (isCsAdminRole(currentUser.role)) {
+        resetNotifState('csAdmin');
+        startCsLeadsQuery();
+      } else if (currentUser.role === 'Marketing') {
+        resetNotifState('marketing');
+        startMarketingLeadsQuery(currentUser.name);
+      }
+      renderLeadsScopeBars();
+    }
+
+    function renderLeadsScopeBars() {
+      let html;
+      if (leadsLoadMode === 'semua') {
+        html = 'Menampilkan <b>semua lead</b>, termasuk Closed/Lost lama.' + (leadsHematUnavailable ? '' :
+          ' <button type="button" onclick="setLeadsLoadMode(\'hemat\')" class="font-semibold underline text-[var(--brand-dark)]">Kembali ke mode hemat</button>');
+      } else {
+        html = 'Mode hemat kuota: menampilkan lead aktif + lead masuk ' + LEADS_WINDOW_DAYS + ' hari terakhir. ' +
+          '<button type="button" onclick="setLeadsLoadMode(\'semua\')" class="font-semibold underline text-[var(--brand-dark)]">Tampilkan semua lead</button>';
+      }
+      document.querySelectorAll('.leads-scope-bar').forEach(function (el) { el.innerHTML = html; });
+    }
+
+    // Query hemat gagal (mis. indeks belum dibuat): pakai mode lengkap supaya aplikasi tetap jalan.
+    function fallbackToAllLeads(err) {
+      console.warn('Mode hemat lead belum bisa dipakai, memuat semua lead. Detail:', err && err.message);
+      leadsHematUnavailable = true;
+      setLeadsLoadMode('semua');
+    }
+
+    // ------------------------------------------------------------
+    // Panel CS/Admin: pantauan real-time lead via onSnapshot (sesuai mode muat di atas)
     // ------------------------------------------------------------
     function startLeadsListenerCsAdmin() {
       cleanupLeadsListener();
@@ -3788,25 +3934,35 @@
       }, function (err) {
         console.error('Gagal memuat counter rotasi:', err);
       });
-      unsubscribeLeads = db.collection('leads')
-        .orderBy('createdAt', 'desc')
-        .onSnapshot(function (snapshot) {
-          allLeadsData = snapshot.docs.map(function (doc) {
-            const data = doc.data();
-            return Object.assign({ id: doc.id }, data);
-          });
-          renderMarketingGrid();
-          if (currentDetailMarketing) renderDetailTable(currentDetailMarketing);
-          if (riwayatModalOpen) renderRiwayat();
-          renderAdRotationInfo();
-          renderPendingAcceptPanel();
-          checkExpiredPendingLeads();
-          updateNotifBadge('csAdmin', allLeadsData);
-          processRealtimeNotifications('csAdmin', allLeadsData);
-          syncWaIndex();
-        }, function (err) {
-          console.error('Gagal memuat leads:', err);
-        });
+      startCsLeadsQuery();
+      renderLeadsScopeBars();
+    }
+
+    function startCsLeadsQuery() {
+      if (typeof unsubscribeLeads === 'function') { unsubscribeLeads(); unsubscribeLeads = null; }
+      const col = db.collection('leads');
+      const queries = leadsLoadMode === 'semua'
+        ? { semua: col }
+        : { aktif: col.where('status', 'not-in', CLOSED_STATUSES), baru: col.where('createdAt', '>=', leadsWindowStart()) };
+      unsubscribeLeads = listenLeadQueries(queries, function (leads, changedIds, isInitial) {
+        allLeadsData = leads.sort(function (a, b) { return leadCreatedMs(b) - leadCreatedMs(a); });
+        renderMarketingGrid();
+        if (currentDetailMarketing) renderDetailTable(currentDetailMarketing);
+        if (riwayatModalOpen) renderRiwayat();
+        renderAdRotationInfo();
+        renderPendingAcceptPanel();
+        checkExpiredPendingLeads();
+        updateNotifBadge('csAdmin', allLeadsData);
+        processRealtimeNotifications('csAdmin', allLeadsData);
+        syncWaIndex(changedIds, isInitial);
+        if (leadsLoadMode === 'semua' && !allLeadsReady) {
+          allLeadsReady = true;
+          refreshManageModalIfIdle('users');
+        }
+      }, function (err) {
+        if (leadsLoadMode === 'hemat') { fallbackToAllLeads(err); return; }
+        console.error('Gagal memuat leads:', err);
+      });
     }
 
     function renderMarketingGrid() {
@@ -3968,6 +4124,10 @@
 
       batch.commit()
         .then(function () {
+          ids.forEach(function (id) {
+            const lead = allLeadsData.find(function (l) { return l.id === id; });
+            if (lead) waIndexRemove(id, lead.waNumber);
+          });
           cancelCsSelectMode();
         })
         .catch(function (err) {
@@ -4104,10 +4264,19 @@
 
         const waError = validateWaNumber(waNumber);
         if (waError) { alert(waError); return; }
-        const dupLead = findDuplicateLead(allLeadsData, waNumber);
-        if (dupLead && !confirm('Nomor ini sudah terdaftar atas nama "' + dupLead.buyerName + '" (marketing ' + (dupLead.assignedTo || '-') + ', status ' + (dupLead.status || '-') + ').\n\nTetap simpan sebagai lead baru?')) return;
-
+        // Cek nomor ganda: di data yang sedang dimuat dulu. Kalau tidak ketemu dan panel memakai mode
+        // hemat (lead Closed/Lost lama tidak dimuat), cek juga ke indeks nomor WA (1-2 baca).
         leadSubmitBtn.disabled = true;
+        leadSubmitBtn.textContent = 'Memeriksa nomor...';
+        const localDup = findDuplicateLead(allLeadsData, waNumber);
+        const dupCheck = (localDup || leadsLoadMode === 'semua') ? Promise.resolve(localDup) : findDuplicateInWaIndex(waNumber);
+        dupCheck.then(function (dupLead) {
+        if (dupLead && !confirm('Nomor ini sudah terdaftar atas nama "' + (dupLead.buyerName || '-') + '" (marketing ' + (dupLead.assignedTo || '-') + ', status ' + (dupLead.status || '-') + ').\n\nTetap simpan sebagai lead baru?')) {
+          leadSubmitBtn.disabled = false;
+          leadSubmitBtn.textContent = 'Submit Lead';
+          return;
+        }
+
         leadSubmitBtn.textContent = 'Menyimpan...';
 
         const newLeadData = {
@@ -4178,6 +4347,7 @@
           leadSubmitBtn.disabled = false;
           leadSubmitBtn.textContent = 'Submit Lead';
         });
+        });   // akhir dupCheck.then (cek nomor ganda)
         // onSnapshot pada koleksi 'leads' akan otomatis memperbarui dashboard, tabel, & info rotasi berikutnya.
       });
     }
@@ -4803,13 +4973,20 @@
     // ------------------------------------------------------------
     function startLeadsListenerMarketing(name) {
       cleanupLeadsListener();
-      unsubscribeLeads = db.collection('leads')
-        .where('assignedTo', '==', name)
-        .onSnapshot(function (snapshot) {
-          const docs = snapshot.docs.map(function (doc) {
-            const data = doc.data();
-            return Object.assign({ id: doc.id }, data);
-          });
+      startMarketingLeadsQuery(name);
+      renderLeadsScopeBars();
+    }
+
+    // Mode hemat marketing: lead aktif miliknya + lead miliknya yang masuk 90 hari terakhir.
+    // Query kedua butuh indeks gabungan Firestore (leads: assignedTo + createdAt). Kalau indeks itu
+    // belum dibuat, query gagal dan aplikasi otomatis memakai mode lengkap (fallbackToAllLeads).
+    function startMarketingLeadsQuery(name) {
+      if (typeof unsubscribeLeads === 'function') { unsubscribeLeads(); unsubscribeLeads = null; }
+      const base = db.collection('leads').where('assignedTo', '==', name);
+      const queries = leadsLoadMode === 'semua'
+        ? { semua: base }
+        : { aktif: base.where('status', 'in', ACTIVE_LEAD_STATUSES), baru: base.where('createdAt', '>=', leadsWindowStart()) };
+      unsubscribeLeads = listenLeadQueries(queries, function (docs) {
           // Lead yang belum ditekan "Terima" dipisah: tampil di kartu hitung mundur di atas, dan
           // TIDAK masuk daftar/filter/ekspor/notifikasi biasa sampai diterima.
           marketingPendingLeads = docs.filter(isPendingAccept);
@@ -4822,9 +4999,10 @@
           renderMarketingCards();
           updateNotifBadge('marketing', marketingLeadsData);
           processRealtimeNotifications('marketing', marketingLeadsData);
-        }, function (err) {
-          console.error('Gagal memuat lead marketing:', err);
-        });
+      }, function (err) {
+        if (leadsLoadMode === 'hemat') { fallbackToAllLeads(err); return; }
+        console.error('Gagal memuat lead marketing:', err);
+      });
     }
 
     function renderMarketingCards() {
@@ -5455,6 +5633,7 @@
 
       db.collection('leads').doc(leadId).delete()
         .then(function () {
+          waIndexRemove(leadId, lead.waNumber);
           closeDetailModal();
         })
         .catch(function (err) {
@@ -5617,6 +5796,13 @@
       const el = document.getElementById('manageContent');
       if (!el) return;
       if (manageTab === 'projects') { el.innerHTML = renderProjectsPanel(); return; }
+      // Kelola Akun memeriksa SEMUA lead milik tiap akun (termasuk Closed/Lost lama, mis. untuk
+      // mengunci nama, menonaktifkan, dan Hapus Permanen), jadi data lead lengkap dimuat dulu.
+      if (!allLeadsReady) {
+        if (leadsLoadMode !== 'semua') setLeadsLoadMode('semua');
+        el.innerHTML = '<p class="text-sm text-[var(--muted)] py-8 text-center">Memuat semua data lead...</p>';
+        return;
+      }
       if (manageView === 'add' || manageView === 'edit') {
         el.innerHTML = renderUserForm();
         onUserFormRoleChange();
@@ -6499,6 +6685,7 @@
         });
       })
         .then(function () {
+          if (target === '__delete__') leads.forEach(function (l) { waIndexRemove(l.id, l.waNumber); });
           step = 'menghapus riwayat aktivitas';
           const actRef = db.collection('marketingActivity').doc(u.uid);
           return actRef.collection('logs').get().then(function (snap) {
