@@ -9,6 +9,7 @@
 //     Jendelanya 90 detik (bukan 60) supaya tidak terlewat kalau cron telat beberapa detik.
 //  3. Cadangan: lead baru yang push "lead masuk"-nya belum terkirim -> dikirim.
 //  4. Setiap hari jam 09:00 WIB -> push ringkasan follow-up hari ini ke tiap marketing.
+//  5. Setiap hari jam 08:00 WIB -> pengingat janji kunjungan hari ini ke SPV/Manager & marketing-nya.
 //
 // Hemat kuota Firestore: data akun (koleksi users) hanya dibaca kalau ada lead yang
 // menunggu diterima, atau saat pengingat harian benar-benar dikirim. Kalau tidak ada
@@ -17,6 +18,7 @@
 // Environment Variable di Vercel:
 //   CRON_SECRET = kata sandi bebas (acak & panjang), sama dengan ?key= di cron-job.org
 //   DAILY_REMINDER_HOUR (opsional) = jam pengingat harian WIB, default 9
+//   VISIT_REMINDER_HOUR (opsional) = jam pengingat kunjungan WIB, default 8
 // ============================================================
 const L = require('./_lib');
 
@@ -67,19 +69,25 @@ async function reassignOrWarn(doc, pool, users, link, now, out) {
     return;
   }
 
-  // 1. Pengalihan.
+  // 1. Pengalihan. Kandidat diambil dari antrean giliran (settings/adRotation.queue):
+  //    yang terlewat didahulukan untuk lead berikutnya, giliran penerima dianggap terpakai.
   if (deadline > now) return;
+  const rotRef = L.db().collection('settings').doc('adRotation');
   let moved = null;
   await L.db().runTransaction(async function (tx) {
     moved = null;
     const s = await tx.get(ref);
+    const rotSnap = await tx.get(rotRef);
     if (!s.exists) return;
     const d = s.data();
     if (d.pendingAccept !== true || d.acceptExhausted || L.toMillis(d.acceptDeadline) > Date.now()) return;
-    const next = L.nextCandidate(pool, d);
+    const rot = rotSnap.exists ? rotSnap.data() : {};
+    const queue = L.normalizeRotationQueue(rot.queue, pool, rot.counter || 0);
+    const next = L.nextInQueue(queue, d);
     if (next === null) return;
     if (!next) { tx.update(ref, { acceptExhausted: true }); moved = { exhausted: true }; return; }
     const newDeadline = L.Timestamp.fromMillis(Date.now() + L.ACCEPT_WINDOW_MS);
+    tx.set(rotRef, { queue: L.applyReassignToQueue(queue, d.assignedTo, next), updatedAt: L.FieldValue.serverTimestamp() }, { merge: true });
     tx.update(ref, {
       assignedTo: next,
       passedFrom: L.FieldValue.arrayUnion(d.assignedTo),
@@ -127,7 +135,8 @@ async function dailyReminder(loadUsers, link, now, out) {
   const counts = {};
   leads.forEach(function (l) {
     if (!l.assignedTo || l.pendingAccept === true || L.CLOSED_STATUSES.indexOf(l.status) !== -1) return;
-    let due = l.status === 'New' || l.status === 'Awal Chat';
+    // 'New' = belum pernah di-update marketing; status lain (termasuk 'Awal Chat') mengikuti jadwal.
+    let due = l.status === 'New';
     if (!due) {
       const ms = L.toMillis(l.nextFollowUpDate || l.lastUpdated || l.createdAt);
       due = !!ms && L.wibParts(ms).dateKey <= todayKey;
@@ -148,6 +157,54 @@ async function dailyReminder(loadUsers, link, now, out) {
   }
 }
 
+// 5. Pengingat janji kunjungan hari ini (sekali sehari jam 08:00 WIB, dicatat di settings/pushVisit):
+//    ke SPV/Manager (role Admin) berupa ringkasan, dan ke marketing pemilik lead.
+async function visitReminder(loadUsers, link, now, out) {
+  const hour = Number(process.env.VISIT_REMINDER_HOUR || 8);
+  const t = L.wibParts(now);
+  if (t.hour !== hour) return;
+  const flagRef = L.db().collection('settings').doc('pushVisit');
+  const go = await L.db().runTransaction(async function (tx) {
+    const s = await tx.get(flagRef);
+    if (s.exists && s.data().lastDate === t.dateKey) return false;
+    tx.set(flagRef, { lastDate: t.dateKey, sentAt: L.FieldValue.serverTimestamp() }, { merge: true });
+    return true;
+  });
+  if (!go) return;
+
+  const visits = (await L.db().collection('leads').where('visitDate', '==', t.dateKey).get())
+    .docs.map(function (d) { return Object.assign({ id: d.id }, d.data()); })
+    .filter(function (l) { return L.CLOSED_STATUSES.indexOf(l.status) === -1; })
+    .sort(function (a, b) { return String(a.visitTime || '99').localeCompare(String(b.visitTime || '99')); });
+  if (!visits.length) return;
+
+  const users = await loadUsers();
+  function line(l, withMarketing) {
+    return (withMarketing ? (l.assignedTo || '-') + ': ' : '') + (l.buyerName || '-') + ' (' + (l.project || '-') + ')' +
+      (l.visitTime ? ' jam ' + l.visitTime : '');
+  }
+  const summary = visits.slice(0, 4).map(function (l) { return line(l, true); }).join('; ') +
+    (visits.length > 4 ? '; dan ' + (visits.length - 4) + ' lainnya' : '') + '.';
+  const adminUids = users.filter(function (u) { return u.role === 'Admin'; }).map(function (u) { return u.uid; });
+  await L.sendToUids(adminUids, {
+    kind: 'visit', link: link, tag: 'visit-day-' + t.dateKey, sticky: true,
+    title: 'Hari ini ada ' + visits.length + ' kunjungan buyer',
+    body: summary
+  });
+
+  const byMarketing = {};
+  visits.forEach(function (l) { (byMarketing[l.assignedTo] = byMarketing[l.assignedTo] || []).push(l); });
+  for (const name of Object.keys(byMarketing)) {
+    const list = byMarketing[name];
+    await L.sendToUids(L.uidsByName(users, name, 'Marketing'), {
+      kind: 'visit', link: link, tag: 'visit-day-' + t.dateKey, sticky: true,
+      title: 'Hari ini ada kunjungan buyer!',
+      body: list.map(function (l) { return line(l, false); }).join('; ') + '. Siapkan unit & materinya ya.'
+    });
+  }
+  out.visits = visits.length;
+}
+
 module.exports = async function handler(req, res) {
   const secret = process.env.CRON_SECRET;
   if (!secret) return res.status(500).json({ error: 'CRON_SECRET belum diisi di Vercel.' });
@@ -158,7 +215,7 @@ module.exports = async function handler(req, res) {
 
   const now = Date.now();
   const link = L.baseUrl(req);
-  const out = { pending: 0, created: 0, warned: 0, reassigned: 0, exhausted: 0, escalated: 0, daily: 0, errors: [] };
+  const out = { pending: 0, created: 0, warned: 0, reassigned: 0, exhausted: 0, escalated: 0, daily: 0, visits: 0, errors: [] };
 
   // Data akun dibaca sekali saja per panggilan, dan hanya kalau memang dibutuhkan.
   let usersPromise = null;
@@ -180,6 +237,9 @@ module.exports = async function handler(req, res) {
 
   try { await dailyReminder(loadUsers, link, now, out); }
   catch (e) { out.errors.push('daily: ' + e.message); }
+
+  try { await visitReminder(loadUsers, link, now, out); }
+  catch (e) { out.errors.push('visit: ' + e.message); }
 
   return res.json(out);
 };
