@@ -1,7 +1,8 @@
 // ============================================================
 // POST /api/notify  — dipanggil aplikasi setelah sebuah kejadian, server lalu mengirim push.
 //   Header : Authorization: Bearer <Firebase ID token>
-//   Body   : { event: 'lead-created' | 'lead-reassigned' | 'lead-accepted', leadId }
+//   Body   : { event: 'lead-created' | 'lead-reassigned' | 'lead-accepted' |
+//                     'visit-scheduled' | 'visit-cancelled', leadId }
 // Server selalu membaca ulang data lead dari Firestore (isi pesan tidak diambil dari
 // pengirim) dan mencatat pushKeys di lead supaya notif yang sama tidak terkirim dua kali.
 // ============================================================
@@ -49,6 +50,32 @@ module.exports = async function handler(req, res) {
       title: 'Lead diterima ' + lead.acceptedBy,
       body: (lead.buyerName || '-') + ' (' + (lead.project || '-') + ') diterima ' + (mins < 1 ? 'kurang dari 1' : mins) + ' menit setelah masuk' +
         (lead.acceptedLate ? ' (terlambat).' : '.')
+    });
+    return res.json(r);
+  }
+
+  // Janji kunjungan dibuat/diubah atau dibatalkan marketing -> push ke SPV/Manager (role Admin).
+  if (event === 'visit-scheduled' || event === 'visit-cancelled') {
+    if (role !== 'Marketing' || lead.assignedTo !== caller.profile.name) {
+      return res.status(403).json({ error: 'Tidak diizinkan.' });
+    }
+    const scheduled = event === 'visit-scheduled';
+    if (scheduled && !lead.visitDate) return res.json({ skipped: 'tidak ada janji kunjungan' });
+    if (!scheduled && (lead.visitDate || !lead.visitCancelled)) return res.json({ skipped: 'tidak ada pembatalan' });
+    const stamp = L.toMillis(scheduled ? lead.visitSetAt : lead.visitCancelledAt);
+    if (!(await L.claimPushKey(ref, (scheduled ? 'visit-' : 'visitcancel-') + stamp))) return res.json({ skipped: 'sudah dikirim' });
+    const who = caller.profile.name;
+    const adminUids = users.filter(function (u) { return u.role === 'Admin'; }).map(function (u) { return u.uid; });
+    const r = await L.sendToUids(adminUids, scheduled ? {
+      kind: 'visit', leadId: leadId, link: link, tag: 'visit-' + leadId,
+      title: 'Janji kunjungan dari ' + who,
+      body: (lead.buyerName || '-') + ' (' + (lead.project || '-') + ') akan berkunjung ' +
+        L.formatVisit(lead.visitDate, lead.visitTime) + '.'
+    } : {
+      kind: 'visit', leadId: leadId, link: link, tag: 'visit-' + leadId,
+      title: 'Kunjungan dibatalkan',
+      body: 'Kunjungan ' + (lead.buyerName || '-') + ' (' + (lead.project || '-') + ') ' + lead.visitCancelled +
+        ' dibatalkan oleh ' + who + '.'
     });
     return res.json(r);
   }
