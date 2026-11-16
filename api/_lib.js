@@ -86,6 +86,7 @@ function rotationPool(users) {
   return inRot.length ? inRot : mk.map(function (u) { return u.name; });
 }
 
+// (Lama) kandidat berikutnya menurut urutan rotasi tetap. Diganti antrean di bawah.
 function nextCandidate(pool, lead) {
   if (!pool.length) return null;
   const tried = new Set((lead.passedFrom || []).concat([lead.assignedTo]));
@@ -95,6 +96,50 @@ function nextCandidate(pool, lead) {
     if (!tried.has(name)) return name;
   }
   return '';
+}
+
+// ---------- Antrean giliran rotasi (settings/adRotation.queue) ----------
+// Aturannya sama persis dengan index.html:
+//  - Lead iklan baru -> marketing terdepan, lalu ia pindah ke belakang antrean.
+//  - Lead CS (Umum/Iklan) dialihkan dari X ke Y -> X ke depan (didahulukan untuk lead
+//    berikutnya), Y ke belakang (gilirannya dianggap terpakai).
+//  - Kandidat pengalihan = urutan antrean, melewati yang sudah pernah dilewati lead tsb.
+function normalizeRotationQueue(stored, list, counter) {
+  if (!list.length) return [];
+  if (Array.isArray(stored) && stored.length) {
+    const q = [];
+    stored.forEach(function (n) { if (list.indexOf(n) !== -1 && q.indexOf(n) === -1) q.push(n); });
+    list.forEach(function (n) { if (q.indexOf(n) === -1) q.push(n); });
+    return q;
+  }
+  const start = ((Number(counter) || 0) % list.length + list.length) % list.length;
+  return list.slice(start).concat(list.slice(0, start));
+}
+
+function applyReassignToQueue(queue, from, to) {
+  const q = queue.filter(function (n) { return n !== from && n !== to; });
+  if (queue.indexOf(from) !== -1) q.unshift(from);
+  if (queue.indexOf(to) !== -1) q.push(to);
+  return q;
+}
+
+// null = belum ada marketing sama sekali, '' = semua sudah dilewati.
+function nextInQueue(queue, lead) {
+  if (!queue || !queue.length) return null;
+  const tried = new Set((lead.passedFrom || []).concat([lead.assignedTo]));
+  for (let i = 0; i < queue.length; i++) {
+    if (!tried.has(queue[i])) return queue[i];
+  }
+  return '';
+}
+
+// ---------- Janji kunjungan: visitDate 'yyyy-mm-dd' (WIB) + visitTime 'HH:MM' opsional ----------
+const VISIT_DAY_NAMES = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
+function formatVisit(dateStr, timeStr) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(dateStr || ''));
+  if (!m) return '-';
+  const d = new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])));
+  return VISIT_DAY_NAMES[d.getUTCDay()] + ', ' + m[3] + '/' + m[2] + '/' + m[1] + (timeStr ? ' jam ' + timeStr : '');
 }
 
 function uidsByName(users, name, role) {
@@ -183,5 +228,6 @@ function msgLeadWarn(lead, link) {
 module.exports = {
   admin, initAdmin, db, FieldValue, Timestamp, readBody, baseUrl, toMillis, wibParts, authUser,
   isStaffRole, activeUsers, rotationPool, nextCandidate, uidsByName, sendToUids, claimPushKey,
-  msgLeadCreated, msgLeadAssigned, msgLeadWarn, ACCEPT_WINDOW_MS, CLOSED_STATUSES
+  msgLeadCreated, msgLeadAssigned, msgLeadWarn, ACCEPT_WINDOW_MS, CLOSED_STATUSES,
+  normalizeRotationQueue, applyReassignToQueue, nextInQueue, formatVisit
 };
