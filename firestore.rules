@@ -72,6 +72,14 @@ service cloud.firestore {
       allow list, delete: if isStaff();
     }
 
+    // ---------- Nomor spam dari iklan (dicatat CS lewat tab "Input Spam") ----------
+    // Tidak masuk ke marketing; dilihat CS & SPV di Riwayat. Hapus untuk koreksi salah input.
+    match /spamNumbers/{spamId} {
+      allow read: if isStaff();
+      allow create: if isStaff() && request.resource.data.createdByUid == request.auth.uid;
+      allow delete: if isStaff();
+    }
+
     // ---------- Aktivitas marketing ----------
     match /marketingActivity/{uid} {
       allow read: if isStaff() || isSelf(uid);
