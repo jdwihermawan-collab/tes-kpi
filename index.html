@@ -131,7 +131,7 @@
   }
   .hidden{ display:none !important; }
 
-  /* Label jenis data lead: Data CS (Iklan/Umum) vs Data Sendiri (input mandiri marketing) */
+  /* Label jenis data lead: Input CS (Iklan/Umum) vs Input Manual (input mandiri marketing) */
   .data-type-pill{
     display:inline-flex; align-items:center; white-space:nowrap;
     font-size:0.6875rem; font-weight:600; line-height:1.2;
@@ -1478,7 +1478,7 @@
               <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><path d="M12.5 2c.3 2.2-.6 3.6-2 5-1.6 1.6-3 3.3-3 5.8a4.5 4.5 0 0 0 9 0c0-1-.3-1.8-.7-2.6.9.5 1.7 1.4 1.7 3.1a5.5 5.5 0 0 1-11 0C6.5 9.3 8.7 7 10.3 5.3 11.4 4.1 12.6 3 12.5 2Z"/></svg>
             </button>
           </div>
-          <span id="detailModalDataType" class="data-type-pill data-type-umum">Data CS</span>
+          <span id="detailModalDataType" class="data-type-pill data-type-umum">Input CS</span>
           <span id="detailModalHotBadge" class="hidden hot-badge">🔥 Hot Prospek</span>
         </div>
       </div>
@@ -2326,12 +2326,12 @@
     // Jenis data lead: dari CS (tab Iklan / tab Umum) atau input sendiri oleh marketing.
     function leadDataType(lead) {
       if (lead && lead.isSelfInput === true) {
-        return { key: 'sendiri', label: 'Data Sendiri', hint: 'Diinput sendiri oleh marketing (+ Lead Baru)' };
+        return { key: 'sendiri', label: 'Input Manual', hint: 'Diinput manual oleh marketing lewat tombol + Lead Baru' };
       }
       if (lead && lead.isAdLead === true) {
-        return { key: 'iklan', label: 'Data CS · Iklan', hint: 'Dari CS lewat tab Input Lead Iklan (rotasi)' };
+        return { key: 'iklan', label: 'Input CS · Iklan', hint: 'Diinput CS lewat tab Input Lead Iklan (rotasi)' };
       }
-      return { key: 'umum', label: 'Data CS · Umum', hint: 'Dari CS lewat tab Input Lead Umum' };
+      return { key: 'umum', label: 'Input CS · Umum', hint: 'Diinput CS lewat tab Input Lead Umum' };
     }
 
     // Janji kunjungan: visitDate 'yyyy-mm-dd' (tanggal WIB) + visitTime 'HH:MM' (opsional).
