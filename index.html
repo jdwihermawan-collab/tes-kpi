@@ -131,6 +131,18 @@
   }
   .hidden{ display:none !important; }
 
+  /* Label jenis data lead: Data CS (Iklan/Umum) vs Data Sendiri (input mandiri marketing) */
+  .data-type-pill{
+    display:inline-flex; align-items:center; white-space:nowrap;
+    font-size:0.6875rem; font-weight:600; line-height:1.2;
+    padding:0.2rem 0.55rem; border-radius:999px;
+  }
+  .data-type-iklan{ background:#fff3e0; color:#b45309; }
+  .data-type-umum{ background:var(--brand-soft); color:var(--brand-dark); }
+  .data-type-sendiri{ background:#e8eefc; color:#1e4fb8; }
+  .data-type-spam{ background:var(--red-bg); color:var(--red); }
+  .visit-pill{ background:#f1e8fc; color:#6b2bb8; }
+
   /* CS: tab pemilih mode Input Lead Baru (Umum / Iklan) */
   .cs-input-tabbar{
     display:inline-flex;
@@ -772,6 +784,9 @@
           <button type="button" id="csTabIklanBtn" onclick="switchCsInputTab('iklan')" class="cs-input-tab-btn" role="tab" aria-selected="false">
             Input Lead Iklan
           </button>
+          <button type="button" id="csTabSpamBtn" onclick="switchCsInputTab('spam')" class="cs-input-tab-btn" role="tab" aria-selected="false">
+            Input Spam
+          </button>
         </div>
 
         <form id="leadForm" class="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-5">
@@ -820,6 +835,27 @@
               Submit Lead
             </button>
             <span id="leadToast" class="opacity-0 text-sm font-medium text-[var(--brand-dark)]" style="transition:opacity 0.25s ease;">Lead berhasil ditambahkan.</span>
+          </div>
+        </form>
+
+        <!-- Tab Spam: catat nomor iklan yang ternyata spam. Tidak dikirim ke marketing & tidak memengaruhi rotasi. -->
+        <form id="spamForm" class="hidden grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-5">
+          <p class="md:col-span-2 text-sm text-[var(--muted)] -mt-1">Catat nomor dari iklan yang ternyata spam (salah sambung, bot, iseng). Data ini tidak dikirim ke marketing dan tidak memengaruhi rotasi. Lihat rekapnya di tombol <b>Riwayat</b>.</p>
+          <div>
+            <label class="field-label" for="spamWaNumber">Nomor WhatsApp</label>
+            <input required id="spamWaNumber" name="spamWaNumber" type="tel" placeholder="Contoh: 0812xxxxxxx" class="field-input">
+          </div>
+          <div>
+            <label class="field-label" for="spamProject">Proyek</label>
+            <select required id="spamProject" name="spamProject" class="field-input">
+              <option value="" disabled selected>Pilih proyek</option>
+            </select>
+          </div>
+          <div class="md:col-span-2 flex items-center gap-4 pt-1">
+            <button type="submit" id="spamSubmitBtn" class="btn-primary text-white font-semibold text-sm px-6 py-2.5 rounded-lg">
+              Simpan Spam
+            </button>
+            <span id="spamToast" class="opacity-0 text-sm font-medium text-[var(--brand-dark)]" style="transition:opacity 0.25s ease;">Nomor spam tercatat.</span>
           </div>
         </form>
         </div>
@@ -1250,7 +1286,7 @@
 
     <!-- Modal Update Status Lead -->
     <div id="modalOverlay" class="fixed inset-0 bg-black/50 opacity-0 pointer-events-none z-20 flex hidden items-center justify-center px-4" onclick="closeModal()">
-      <div id="modalBox" class="bg-white rounded-2xl p-5 w-full max-w-sm opacity-0 scale-95" onclick="event.stopPropagation()">
+      <div id="modalBox" class="bg-white rounded-2xl p-5 w-full max-w-sm opacity-0 scale-95 max-h-[90vh] overflow-y-auto" onclick="event.stopPropagation()">
         <h3 class="font-bold text-lg mb-1">Update Status Lead</h3>
         <p id="modalLeadName" class="text-sm text-[var(--muted)] mb-4">Nama Lead: Dewi Anggraini</p>
 
@@ -1268,6 +1304,23 @@
 
         <label class="field-label" for="nextFollowUpDate">Jadwal Follow-Up Berikutnya</label>
         <input type="date" id="nextFollowUpDate" class="modal-input mb-4">
+
+        <!-- Janji kunjungan (opsional): SPV/Manager langsung diberi tahu, dan diingatkan jam 08:00 pada hari H -->
+        <div class="border border-[var(--line)] rounded-xl p-3 mb-4" style="background:#faf8fd;">
+          <p class="field-label mb-0.5">Janji Kunjungan <span class="font-normal text-[var(--muted)]">(opsional)</span></p>
+          <p class="text-xs text-[var(--muted)] mb-2">Isi kalau buyer sudah janjian datang. SPV/Manager langsung dapat notifikasi, dan pada hari H jam 08:00 kamu &amp; SPV/Manager diingatkan.</p>
+          <div class="grid grid-cols-2 gap-2">
+            <div>
+              <label class="text-xs font-semibold text-[var(--muted)] mb-1 block" for="visitDateInput">Tanggal</label>
+              <input type="date" id="visitDateInput" class="modal-input">
+            </div>
+            <div>
+              <label class="text-xs font-semibold text-[var(--muted)] mb-1 block" for="visitTimeInput">Jam (boleh kosong)</label>
+              <input type="time" id="visitTimeInput" class="modal-input">
+            </div>
+          </div>
+          <button type="button" id="visitClearBtn" onclick="clearVisitInputs()" class="hidden text-xs font-semibold mt-2" style="color:var(--red);">Batalkan janji kunjungan</button>
+        </div>
 
         <label class="field-label" for="updateNote">Catatan Update <span class="text-[#a3352c]">*</span></label>
         <textarea id="updateNote" rows="3" maxlength="500" class="modal-input mb-5" style="resize:vertical;" placeholder="Tulis hasil follow-up, mis. buyer minta survei hari Sabtu"></textarea>
@@ -1293,7 +1346,7 @@
       <div class="flex items-start justify-between gap-3 mb-3">
         <div>
           <h3 class="font-bold text-lg">Riwayat Submit Lead</h3>
-          <p class="text-sm text-[var(--muted)] mt-0.5">Submitan terbaru dari Input Lead Umum dan Iklan. Klik baris untuk melihat detail.</p>
+          <p class="text-sm text-[var(--muted)] mt-0.5">Submitan terbaru dari Input Lead Umum, Iklan, dan Spam. Klik baris lead untuk melihat detail.</p>
         </div>
         <button type="button" onclick="closeRiwayatModal()" class="text-[var(--muted)] text-2xl leading-none px-1" aria-label="Tutup">&times;</button>
       </div>
@@ -1425,6 +1478,7 @@
               <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><path d="M12.5 2c.3 2.2-.6 3.6-2 5-1.6 1.6-3 3.3-3 5.8a4.5 4.5 0 0 0 9 0c0-1-.3-1.8-.7-2.6.9.5 1.7 1.4 1.7 3.1a5.5 5.5 0 0 1-11 0C6.5 9.3 8.7 7 10.3 5.3 11.4 4.1 12.6 3 12.5 2Z"/></svg>
             </button>
           </div>
+          <span id="detailModalDataType" class="data-type-pill data-type-umum">Data CS</span>
           <span id="detailModalHotBadge" class="hidden hot-badge">🔥 Hot Prospek</span>
         </div>
       </div>
@@ -1445,6 +1499,10 @@
         <div class="col-span-2">
           <p class="text-xs text-[var(--muted)]">Jadwal Follow-Up Berikutnya</p>
           <p id="detailModalFollowUp" class="font-medium">-</p>
+        </div>
+        <div id="detailModalVisitWrap" class="col-span-2 hidden">
+          <p class="text-xs text-[var(--muted)]">Janji Kunjungan</p>
+          <p id="detailModalVisit" class="font-medium" style="color:#6b2bb8;">-</p>
         </div>
       </div>
 
@@ -1591,6 +1649,7 @@
     let unsubscribeLeads = null;     // handle onSnapshot aktif (CS/Admin atau Marketing)
     let unsubscribeRotation = null;  // handle onSnapshot counter rotasi iklan (settings/adRotation)
     let adRotationCounter = null;    // jumlah lead iklan yang sudah dibagikan; null = dokumen counter belum ada/belum terbaca
+    let adRotationQueue = null;      // antrean giliran rotasi (settings/adRotation.queue); null = belum ada
     let allLeadsData = [];           // dipakai role CS/Admin (semua lead)
     let marketingLeadsData = [];     // dipakai role Marketing (lead miliknya saja, yang sudah diterima)
     let marketingPendingLeads = [];  // lead milik marketing yang belum ditekan "Terima"
@@ -2060,7 +2119,7 @@
 
     const CLOSED_STATUSES = ['Closed (Deal)', 'Lost (Batal)'];
 
-    let csInputMode = 'umum'; // 'umum' | 'iklan' — mode aktif form Input Lead Baru di Panel CS/Admin
+    let csInputMode = 'umum'; // 'umum' | 'iklan' | 'spam' — mode aktif form Input Lead Baru di Panel CS/Admin
 
     // ------------------------------------------------------------
     // Daftar marketing (roster) — TIDAK lagi ditulis di kode. Diambil real-time dari
@@ -2136,6 +2195,7 @@
     function applyProjectList() {
       fillSelectOptions('project', projectList, 'Pilih proyek', true);
       fillSelectOptions('selfProject', projectList, 'Pilih proyek', true);
+      fillSelectOptions('spamProject', projectList, 'Pilih proyek', true);
       fillSelectOptions('csFilterProject', projectList, 'Semua Proyek', false);
       fillSelectOptions('marketingFilterProject', projectList, 'Semua Proyek', false);
       refreshManageModalIfIdle('projects');
@@ -2261,6 +2321,45 @@
       if (diff === 1) return 'Jadwal follow-up besok, ' + tgl;
       if (diff === 0) return 'Jadwal follow-up hari ini, ' + tgl;
       return 'Lewat jadwal follow-up ' + Math.abs(diff) + ' hari (' + tgl + ') &ndash; wajib follow-up sekarang';
+    }
+
+    // Jenis data lead: dari CS (tab Iklan / tab Umum) atau input sendiri oleh marketing.
+    function leadDataType(lead) {
+      if (lead && lead.isSelfInput === true) {
+        return { key: 'sendiri', label: 'Data Sendiri', hint: 'Diinput sendiri oleh marketing (+ Lead Baru)' };
+      }
+      if (lead && lead.isAdLead === true) {
+        return { key: 'iklan', label: 'Data CS · Iklan', hint: 'Dari CS lewat tab Input Lead Iklan (rotasi)' };
+      }
+      return { key: 'umum', label: 'Data CS · Umum', hint: 'Dari CS lewat tab Input Lead Umum' };
+    }
+
+    // Janji kunjungan: visitDate 'yyyy-mm-dd' (tanggal WIB) + visitTime 'HH:MM' (opsional).
+    const VISIT_DAY_NAMES = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
+
+    function formatVisit(dateStr, timeStr) {
+      if (!dateStr || !/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) return '';
+      const d = fromDateInputValue(dateStr);
+      return VISIT_DAY_NAMES[d.getDay()] + ', ' + formatDateID(d) + (timeStr ? ' · ' + timeStr : '');
+    }
+
+    // Label singkat janji kunjungan yang belum lewat ('' kalau tidak ada / sudah lewat).
+    function upcomingVisitLabel(lead) {
+      if (!lead || !lead.visitDate || CLOSED_STATUSES.indexOf(lead.status) !== -1) return '';
+      const diff = daysDiffDateOnly(fromDateInputValue(lead.visitDate), new Date());
+      if (diff < 0) return '';
+      const when = diff === 0 ? 'Hari ini' : diff === 1 ? 'Besok' : formatVisit(lead.visitDate, '');
+      return 'Kunjungan ' + when + (lead.visitTime ? ' · ' + lead.visitTime : '');
+    }
+
+    function visitPillHtml(lead) {
+      const label = upcomingVisitLabel(lead);
+      return label ? '<span class="data-type-pill visit-pill">' + escapeHtml(label) + '</span>' : '';
+    }
+
+    function dataTypePillHtml(lead) {
+      const t = leadDataType(lead);
+      return '<span class="data-type-pill data-type-' + t.key + '" title="' + escapeHtml(t.hint) + '">' + escapeHtml(t.label) + '</span>';
     }
 
     function waLink(number) {
@@ -3157,9 +3256,43 @@
       return String(date.getHours()).padStart(2, '0') + ':' + String(date.getMinutes()).padStart(2, '0');
     }
 
+    // Data spam (koleksi spamNumbers) hanya dibaca selama modal Riwayat terbuka, sesuai rentang tanggalnya.
+    let spamData = [];
+    let unsubscribeSpam = null;
+    let spamQueryKey = null;
+    const SPAM_MAX_ROWS = 1000;
+
+    function stopSpamListener() {
+      if (typeof unsubscribeSpam === 'function') unsubscribeSpam();
+      unsubscribeSpam = null;
+      spamQueryKey = null;
+    }
+
+    function ensureSpamListener() {
+      if (!riwayatModalOpen) return;
+      const from = riwayatState.dateFrom ? parseFilterDateValue(riwayatState.dateFrom, false) : null;
+      const key = from ? String(from.getTime()) : 'all';
+      if (unsubscribeSpam && key === spamQueryKey) return;
+      stopSpamListener();
+      spamQueryKey = key;
+      spamData = [];
+      let q = db.collection('spamNumbers');
+      if (from) q = q.where('createdAt', '>=', firebase.firestore.Timestamp.fromMillis(from.getTime()));
+      q = q.orderBy('createdAt', 'desc').limit(SPAM_MAX_ROWS);
+      unsubscribeSpam = q.onSnapshot(function (snap) {
+        spamData = snap.docs.map(function (d) {
+          return Object.assign({ id: d.id }, d.data({ serverTimestamps: 'estimate' }));
+        });
+        if (riwayatModalOpen) renderRiwayat();
+      }, function (err) {
+        console.warn('Gagal memuat data spam:', err && err.message);
+        spamData = [];
+      });
+    }
+
     function openRiwayatModal() {
-      if (!riwayatInited) { riwayatInited = true; riwayatSetPreset('7'); } else { renderRiwayat(); }
       riwayatModalOpen = true;
+      if (!riwayatInited) { riwayatInited = true; riwayatSetPreset('7'); } else { renderRiwayat(); }
       const overlay = document.getElementById('riwayatModalOverlay');
       const box = document.getElementById('riwayatModalBox');
       overlay.classList.remove('hidden', 'pointer-events-none');
@@ -3171,6 +3304,7 @@
 
     function closeRiwayatModal() {
       riwayatModalOpen = false;
+      stopSpamListener();
       const overlay = document.getElementById('riwayatModalOverlay');
       const box = document.getElementById('riwayatModalBox');
       overlay.style.opacity = '0';
@@ -3231,13 +3365,28 @@
         return true;
       }).sort(function (a, b) { return toJsDate(b.createdAt) - toJsDate(a.createdAt); });
 
+      ensureSpamListener();
+      const spamInRange = spamData.filter(function (s) {
+        const d = s.createdAt ? toJsDate(s.createdAt) : new Date();
+        if (fromDate && d < fromDate) return false;
+        if (toDate && d > toDate) return false;
+        return true;
+      });
+
       const adCount = inRange.filter(function (l) { return l.isAdLead === true; }).length;
       const umumCount = inRange.length - adCount;
+      const spamCount = spamInRange.length;
+      // Baris gabungan lead + spam, terbaru di atas.
       const rows = inRange.filter(function (l) {
+        if (st.type === 'spam') return false;
         if (st.type === 'iklan') return l.isAdLead === true;
         if (st.type === 'umum') return l.isAdLead !== true;
         return true;
-      });
+      }).map(function (l) { return { kind: 'lead', d: toJsDate(l.createdAt), l: l }; })
+        .concat((st.type === 'all' || st.type === 'spam') ? spamInRange.map(function (s) {
+          return { kind: 'spam', d: s.createdAt ? toJsDate(s.createdAt) : new Date(), s: s };
+        }) : [])
+        .sort(function (a, b) { return b.d - a.d; });
 
       document.getElementById('riwayatPresetWrap').innerHTML =
         riwayatChipHtml('Hari Ini', st.preset === 'today', "riwayatSetPreset('today')") +
@@ -3246,22 +3395,47 @@
         riwayatChipHtml('Semua', st.preset === 'all', "riwayatSetPreset('all')");
 
       document.getElementById('riwayatTypeWrap').innerHTML =
-        riwayatChipHtml('Semua (' + inRange.length + ')', st.type === 'all', "riwayatSetType('all')") +
+        riwayatChipHtml('Semua (' + (inRange.length + spamCount) + ')', st.type === 'all', "riwayatSetType('all')") +
         riwayatChipHtml('Umum (' + umumCount + ')', st.type === 'umum', "riwayatSetType('umum')") +
-        riwayatChipHtml('Iklan (' + adCount + ')', st.type === 'iklan', "riwayatSetType('iklan')");
+        riwayatChipHtml('Iklan (' + adCount + ')', st.type === 'iklan', "riwayatSetType('iklan')") +
+        riwayatChipHtml('Spam (' + spamCount + ')', st.type === 'spam', "riwayatSetType('spam')");
 
       document.getElementById('riwayatSummary').textContent =
         rows.length + ' submitan' + (st.dateFrom || st.dateTo
           ? ' (' + (st.dateFrom ? formatDateID(fromDate) : '...') + ' - ' + (st.dateTo ? formatDateID(toDate) : '...') + ')'
           : ' (semua waktu)');
+      // Tab Spam: rekap jumlah spam per proyek (bahan evaluasi iklan).
+      if (st.type === 'spam' && spamCount) {
+        const perProject = {};
+        spamInRange.forEach(function (s) { const p = s.project || '-'; perProject[p] = (perProject[p] || 0) + 1; });
+        document.getElementById('riwayatSummary').textContent += ' · ' + Object.keys(perProject).sort(function (a, b) {
+          return perProject[b] - perProject[a];
+        }).map(function (p) { return p + ': ' + perProject[p]; }).join(', ');
+      }
 
       const listEl = document.getElementById('riwayatList');
       if (!rows.length) {
         listEl.innerHTML = '<p class="text-sm text-[var(--muted)] py-6 text-center">Belum ada submitan pada rentang ini.</p>';
         return;
       }
-      listEl.innerHTML = rows.slice(0, RIWAYAT_MAX_ROWS).map(function (l) {
-        const d = toJsDate(l.createdAt);
+      const canDeleteSpam = !!currentUser && isCsAdminRole(currentUser.role);
+      listEl.innerHTML = rows.slice(0, RIWAYAT_MAX_ROWS).map(function (row) {
+        const d = row.d;
+        if (row.kind === 'spam') {
+          const s = row.s;
+          return '<div class="w-full text-left border border-[var(--line)] rounded-xl px-3.5 py-3">' +
+            '<div class="flex items-start justify-between gap-2">' +
+              '<span class="font-semibold text-sm">' + escapeHtml(s.waNumber || '-') + '</span>' +
+              '<span class="data-type-pill data-type-spam">Spam</span>' +
+            '</div>' +
+            '<div class="text-xs text-[var(--muted)] mt-1">' + escapeHtml(s.project || '-') + '</div>' +
+            '<div class="flex items-center justify-between gap-2 text-xs text-[var(--muted)] mt-1">' +
+              '<span>' + formatDateID(d) + ' &middot; ' + formatTimeID(d) + ' &middot; dicatat ' + escapeHtml(s.createdBy || '-') + '</span>' +
+              (canDeleteSpam ? '<button type="button" onclick="deleteSpamRecord(\'' + escapeHtml(s.id) + '\')" class="font-semibold" style="color:var(--red);">Hapus</button>' : '') +
+            '</div>' +
+          '</div>';
+        }
+        const l = row.l;
         const isAd = l.isAdLead === true;
         const badgeCls = isAd ? 'bg-[#fff3e0] text-[#b45309]' : 'bg-[var(--brand-soft)] text-[var(--brand-dark)]';
         return '<button type="button" onclick="openDetailModal(\'' + escapeHtml(l.id) + '\')" class="w-full text-left border border-[var(--line)] rounded-xl px-3.5 py-3 hover:bg-[#f6f4ef]">' +
@@ -3336,6 +3510,7 @@
             '<span class="text-xs text-[var(--muted)]">' + tgl + '</span>' +
           '</div>' +
           noteText +
+          (n.visit ? '<p class="text-xs font-semibold mt-1" style="color:#6b2bb8;">Janji kunjungan: ' + escapeHtml(n.visit) + '</p>' : '') +
         '</div>';
       }).join('');
     }
@@ -3370,8 +3545,8 @@
       if (CLOSED_STATUSES.indexOf(lead.status) !== -1) return false;
       // Lead berstatus 'New' (baru masuk dari CS, belum pernah di-chat marketing)
       // selalu dianggap butuh perhatian, sampai statusnya diubah ke 'Awal Chat' atau tahap berikutnya.
+      // 'Awal Chat' sudah di-update marketing, jadi mengikuti jadwal follow-up seperti status lain.
       if (lead.status === 'New') return true;
-      if (lead.status === 'Awal Chat') return true;
       const follow = toJsDate(lead.nextFollowUpDate || lead.lastUpdated || lead.createdAt);
       return daysDiffDateOnly(follow, new Date()) <= 0;
     }
@@ -3719,7 +3894,8 @@
         document.getElementById('csHeaderTitle').textContent = APP.appName + (isSuper ? ' - Super Admin' : ' - Panel SPV/Manager');
         document.getElementById('csHeaderSubtitle').textContent = isSuper ? 'Monitoring & Kelola Akun' : 'Monitoring';
         document.getElementById('csInputSection').classList.add('hidden');
-        document.getElementById('csHistoryBtn').classList.add('hidden');
+        // Riwayat input (Umum/Iklan/Spam) juga untuk SPV/Manager; Super Admin tidak perlu.
+        document.getElementById('csHistoryBtn').classList.toggle('hidden', isSuper);
         if (isSuper && manageBtn) manageBtn.classList.remove('hidden');
         if (isSuper && testPushBtn) testPushBtn.classList.remove('hidden');
         showView('cs');
@@ -3785,6 +3961,10 @@
       if (activityModalOpen) closeActivityModal();
       if (activityLogModalOpen) closeActivityLogModal();
       adRotationCounter = null;
+      adRotationQueue = null;
+      if (riwayatModalOpen) closeRiwayatModal();
+      stopSpamListener();
+      spamData = [];
       allLeadsData = [];
       leadsLoadMode = 'hemat';          // setiap sesi login mulai lagi dari mode hemat kuota
       allLeadsReady = false;
@@ -3930,6 +4110,7 @@
       // Counter giliran rotasi iklan (dokumen terpisah, tidak terpengaruh tambah/hapus lead).
       unsubscribeRotation = db.collection('settings').doc('adRotation').onSnapshot(function (snap) {
         adRotationCounter = snap.exists ? (Number(snap.data().counter) || 0) : null;
+        adRotationQueue = snap.exists && Array.isArray(snap.data().queue) ? snap.data().queue : null;
         renderAdRotationInfo();
       }, function (err) {
         console.error('Gagal memuat counter rotasi:', err);
@@ -3978,7 +4159,8 @@
       container.innerHTML = names.map(function (name) {
         const list = allLeadsData.filter(function (l) { return l.assignedTo === name; });
         const aktif = list.filter(function (l) { return CLOSED_STATUSES.indexOf(l.status) === -1; }).length;
-        const belum = list.filter(function (l) { return l.status === 'New' || l.status === 'Awal Chat'; }).length;
+        // Belum Follow-Up = belum pernah di-update marketing sama sekali (status masih 'New').
+        const belum = list.filter(function (l) { return l.status === 'New'; }).length;
         const initial = name.trim().charAt(0).toUpperCase();
         return '<button type="button" onclick="showMarketingDetail(\'' + escapeHtml(name).replace(/'/g, "\\'") + '\')" class="dash-card text-left p-5">' +
           '<div class="flex items-center gap-3 mb-4">' +
@@ -4030,7 +4212,11 @@
             '<td class="px-4 sm:px-5 py-3 text-sm font-medium"><span class="inline-flex items-center gap-1.5 flex-wrap">' + escapeHtml(l.buyerName) + (l.isHot ? '<span class="hot-badge hot-badge-sm">' + ICON_FIRE_SM + 'Hot</span>' : '') + '</span></td>' +
             '<td class="px-4 sm:px-5 py-3 text-sm">' + escapeHtml(l.project) + '</td>' +
             '<td class="px-4 sm:px-5 py-3 text-sm whitespace-nowrap">' + jadwalFollowUp + '</td>' +
-            '<td class="px-4 sm:px-5 py-3"><span class="sla-pill sla-' + sla + '">' + escapeHtml(l.status) + '</span></td>' +
+            '<td class="px-4 sm:px-5 py-3"><div class="flex flex-col items-start gap-1">' +
+              '<span class="sla-pill sla-' + sla + '">' + escapeHtml(l.status) + '</span>' +
+              dataTypePillHtml(l) +
+              visitPillHtml(l) +
+            '</div></td>' +
             '</tr>';
         }).join('');
       }
@@ -4142,18 +4328,53 @@
     // ------------------------------------------------------------
     // Panel CS: Tab "Input Lead Umum" vs "Input Lead Iklan"
     // ------------------------------------------------------------
-    // Marketing berikutnya dalam rotasi dihitung dari data real-time (allLeadsData):
-    // jumlah lead yang sebelumnya masuk lewat Tab Iklan (isAdLead === true) menentukan
-    // posisi giliran saat ini, sehingga selalu konsisten & real-time di semua CS/Admin
-    // tanpa perlu counter/collection terpisah.
-    // Giliran dibaca dari counter tersimpan (settings/adRotation) supaya tidak bergeser saat lead dihapus.
-    // Jika counter belum ada (pemakaian pertama), dipakai hitungan lead iklan yang ada sebagai titik awal.
-    function computeNextAdRotationMarketing() {
-      if (!AD_ROTATION_LIST.length) return '';
-      const count = (adRotationCounter !== null)
+    // Giliran rotasi disimpan sebagai ANTREAN di settings/adRotation.queue (nama marketing, terdepan =
+    // giliran berikutnya). Aturannya (sama persis dengan api/_lib.js di server):
+    //  - Lead iklan baru  -> diberikan ke marketing terdepan, lalu ia pindah ke belakang antrean.
+    //  - Lead CS (Umum maupun Iklan) dialihkan dari X ke Y karena X tidak menekan Terima ->
+    //    X pindah ke depan (didahulukan untuk lead berikutnya, tanpa menunggu satu putaran),
+    //    dan Y pindah ke belakang (gilirannya dianggap sudah terpakai oleh lead itu).
+    //  - Kandidat pengalihan = urutan antrean, melewati yang sudah pernah dilewati lead tsb.
+    // Antrean selalu disesuaikan dengan daftar marketing rotasi terbaru (yang keluar dibuang,
+    // yang baru ditambahkan di belakang). Kalau antrean belum ada (pemakaian pertama), dibentuk
+    // dari counter lama supaya giliran tidak melompat.
+    function normalizeRotationQueue(stored, list, counter) {
+      if (!list.length) return [];
+      if (Array.isArray(stored) && stored.length) {
+        const q = [];
+        stored.forEach(function (n) { if (list.indexOf(n) !== -1 && q.indexOf(n) === -1) q.push(n); });
+        list.forEach(function (n) { if (q.indexOf(n) === -1) q.push(n); });
+        return q;
+      }
+      const start = ((Number(counter) || 0) % list.length + list.length) % list.length;
+      return list.slice(start).concat(list.slice(0, start));
+    }
+
+    function takeRotationTurn(queue) {
+      return { name: queue[0], queue: queue.slice(1).concat([queue[0]]) };
+    }
+
+    function applyReassignToQueue(queue, from, to) {
+      const q = queue.filter(function (n) { return n !== from && n !== to; });
+      if (queue.indexOf(from) !== -1) q.unshift(from);
+      if (queue.indexOf(to) !== -1) q.push(to);
+      return q;
+    }
+
+    // Daftar marketing untuk pengalihan: peserta rotasi; kalau kosong, semua marketing aktif.
+    function reassignPoolList() {
+      return AD_ROTATION_LIST.length ? AD_ROTATION_LIST.slice() : activeMarketingUsers().map(function (u) { return u.name; });
+    }
+
+    function currentRotationCounter() {
+      return (adRotationCounter !== null)
         ? adRotationCounter
         : allLeadsData.filter(function (l) { return l.isAdLead === true; }).length;
-      return AD_ROTATION_LIST[count % AD_ROTATION_LIST.length];
+    }
+
+    function computeNextAdRotationMarketing() {
+      if (!AD_ROTATION_LIST.length) return '';
+      return normalizeRotationQueue(adRotationQueue, AD_ROTATION_LIST, currentRotationCounter())[0] || '';
     }
 
     function renderAdRotationInfo() {
@@ -4168,12 +4389,20 @@
       const assignedWrap = document.getElementById('assignedToFieldWrap');
       const rotationWrap = document.getElementById('rotationInfoWrap');
       const assignedSelect = document.getElementById('assignedTo');
+      const spamBtn = document.getElementById('csTabSpamBtn');
 
       const isIklan = mode === 'iklan';
-      iklanBtn.classList.toggle('cs-input-tab-active', isIklan);
-      umumBtn.classList.toggle('cs-input-tab-active', !isIklan);
-      iklanBtn.setAttribute('aria-selected', String(isIklan));
-      umumBtn.setAttribute('aria-selected', String(!isIklan));
+      const isSpam = mode === 'spam';
+      [[umumBtn, mode === 'umum'], [iklanBtn, isIklan], [spamBtn, isSpam]].forEach(function (pair) {
+        if (!pair[0]) return;
+        pair[0].classList.toggle('cs-input-tab-active', pair[1]);
+        pair[0].setAttribute('aria-selected', String(pair[1]));
+      });
+
+      // Tab Spam memakai form sendiri (nomor + proyek saja).
+      document.getElementById('leadForm').classList.toggle('hidden', isSpam);
+      document.getElementById('spamForm').classList.toggle('hidden', !isSpam);
+      if (isSpam) return;
 
       assignedWrap.classList.toggle('hidden', isIklan);
       rotationWrap.classList.toggle('hidden', !isIklan);
@@ -4271,7 +4500,15 @@
         const localDup = findDuplicateLead(allLeadsData, waNumber);
         const dupCheck = (localDup || leadsLoadMode === 'semua') ? Promise.resolve(localDup) : findDuplicateInWaIndex(waNumber);
         dupCheck.then(function (dupLead) {
-        if (dupLead && !confirm('Nomor ini sudah terdaftar atas nama "' + (dupLead.buyerName || '-') + '" (marketing ' + (dupLead.assignedTo || '-') + ', status ' + (dupLead.status || '-') + ').\n\nTetap simpan sebagai lead baru?')) {
+          if (dupLead && !confirm('Nomor ini sudah terdaftar atas nama "' + (dupLead.buyerName || '-') + '" (marketing ' + (dupLead.assignedTo || '-') + ', status ' + (dupLead.status || '-') + ').\n\nTetap simpan sebagai lead baru?')) {
+            return false;
+          }
+          // Nomor yang pernah dicatat sebagai spam: beri peringatan, tapi tetap boleh disimpan.
+          return findSpamRecord(waNumber).then(function (spam) {
+            return !spam || confirm('Peringatan: nomor ini pernah dicatat sebagai SPAM (' + spamRecordDesc(spam) + ').\n\nTetap simpan sebagai lead?');
+          });
+        }).then(function (proceed) {
+        if (!proceed) {
           leadSubmitBtn.disabled = false;
           leadSubmitBtn.textContent = 'Submit Lead';
           return;
@@ -4308,12 +4545,14 @@
           const rotRef = db.collection('settings').doc('adRotation');
           savePromise = db.runTransaction(function (tx) {
             return tx.get(rotRef).then(function (snap) {
+              const rot = snap.exists ? snap.data() : {};
               const counter = snap.exists
-                ? (Number(snap.data().counter) || 0)
+                ? (Number(rot.counter) || 0)
                 : allLeadsData.filter(function (l) { return l.isAdLead === true; }).length;
               if (!AD_ROTATION_LIST.length) throw new Error('Belum ada marketing aktif di rotasi iklan.');
-              newLeadData.assignedTo = AD_ROTATION_LIST[counter % AD_ROTATION_LIST.length];
-              tx.set(rotRef, { counter: counter + 1, updatedAt: FieldValue.serverTimestamp() });
+              const turn = takeRotationTurn(normalizeRotationQueue(rot.queue, AD_ROTATION_LIST, counter));
+              newLeadData.assignedTo = turn.name;
+              tx.set(rotRef, { counter: counter + 1, queue: turn.queue, updatedAt: FieldValue.serverTimestamp() });
               tx.set(newLeadRef, newLeadData);
             });
           });
@@ -4349,6 +4588,83 @@
         });
         });   // akhir dupCheck.then (cek nomor ganda)
         // onSnapshot pada koleksi 'leads' akan otomatis memperbarui dashboard, tabel, & info rotasi berikutnya.
+      });
+    }
+
+    // ------------------------------------------------------------
+    // Panel CS: Tab "Input Spam" -> koleksi 'spamNumbers'
+    // { waNumber, waDigits, project, createdAt, createdBy, createdByUid }.
+    // Tidak masuk ke marketing, rotasi, notifikasi, maupun hitungan lead.
+    // ------------------------------------------------------------
+    // Cari catatan spam untuk satu nomor (1 kali baca). Gagal baca (mis. rules belum dipasang) = dianggap tidak ada.
+    function findSpamRecord(raw) {
+      const digits = toWaDigits(raw);
+      if (!digits) return Promise.resolve(null);
+      return db.collection('spamNumbers').where('waDigits', '==', digits).limit(1).get()
+        .then(function (snap) {
+          if (!snap || !snap.docs || !snap.docs.length) return null;
+          return Object.assign({ id: snap.docs[0].id }, snap.docs[0].data());
+        })
+        .catch(function (err) {
+          console.warn('Cek nomor spam gagal:', err && err.message);
+          return null;
+        });
+    }
+
+    function spamRecordDesc(spam) {
+      const d = spam && spam.createdAt ? toJsDate(spam.createdAt) : null;
+      return (spam.project || '-') + (d ? ', ' + formatDateID(d) : '') + (spam.createdBy ? ', dicatat ' + spam.createdBy : '');
+    }
+
+    const spamForm = document.getElementById('spamForm');
+    if (spamForm) {
+      spamForm.addEventListener('submit', function (e) {
+        e.preventDefault();
+        if (!currentUser || !isCsAdminRole(currentUser.role)) return;
+        const waNumber = document.getElementById('spamWaNumber').value.trim();
+        const project = document.getElementById('spamProject').value;
+        if (!waNumber || !project) return;
+        const waError = validateWaNumber(waNumber);
+        if (waError) { alert(waError); return; }
+        const asLead = findDuplicateLead(allLeadsData, waNumber);
+        if (asLead && !confirm('Nomor ini terdaftar sebagai lead "' + (asLead.buyerName || '-') + '" (marketing ' + (asLead.assignedTo || '-') + ', status ' + (asLead.status || '-') + ').\n\nTetap catat sebagai spam?')) return;
+
+        const btn = document.getElementById('spamSubmitBtn');
+        btn.disabled = true;
+        btn.textContent = 'Memeriksa nomor...';
+        findSpamRecord(waNumber).then(function (prev) {
+          if (prev && !confirm('Nomor ini sudah pernah dicatat sebagai spam (' + spamRecordDesc(prev) + ').\n\nCatat lagi?')) return null;
+          btn.textContent = 'Menyimpan...';
+          return db.collection('spamNumbers').add({
+            waNumber: waNumber,
+            waDigits: toWaDigits(waNumber),
+            project: project,
+            createdBy: currentUser.name || '',
+            createdByUid: currentUser.uid,
+            createdAt: FieldValue.serverTimestamp()
+          }).then(function () {
+            spamForm.reset();
+            const toast = document.getElementById('spamToast');
+            toast.style.opacity = '1';
+            setTimeout(function () { toast.style.opacity = '0'; }, 2200);
+          });
+        }).catch(function (err) {
+          const perm = err && (err.code === 'permission-denied' || /permission/i.test(err.message || ''));
+          alert('Gagal menyimpan nomor spam: ' + (err && err.message) +
+            (perm ? '\n\nAturan Firestore untuk data spam belum dipasang. Hubungi Super Admin.' : ''));
+        }).finally(function () {
+          btn.disabled = false;
+          btn.textContent = 'Simpan Spam';
+        });
+      });
+    }
+
+    function deleteSpamRecord(id) {
+      if (!currentUser || !isCsAdminRole(currentUser.role)) return;
+      const rec = spamData.find(function (s) { return s.id === id; });
+      if (!confirm('Hapus catatan spam ' + (rec ? rec.waNumber : '') + '? Gunakan ini hanya kalau salah input.')) return;
+      db.collection('spamNumbers').doc(id).delete().catch(function (err) {
+        alert('Gagal menghapus catatan spam: ' + err.message);
       });
     }
 
@@ -4724,17 +5040,13 @@
       sendAcceptWaNotif(allLeadsData.find(function (l) { return l.id === leadId; }));
     }
 
-    // Marketing berikutnya di rotasi iklan setelah pemegang saat ini, melewati yang sudah pernah dilewati lead ini.
+    // Kandidat pengalihan: marketing terdepan di antrean rotasi yang belum pernah dilewati lead ini.
     // null = daftar marketing belum termuat (jangan ambil keputusan), '' = tidak ada lagi yang tersisa.
-    function nextAcceptCandidate(d) {
-      let pool = AD_ROTATION_LIST.slice();
-      if (!pool.length) pool = activeMarketingUsers().map(function (u) { return u.name; });
-      if (!pool.length) return null;
+    function nextAcceptCandidate(d, queue) {
+      if (!queue || !queue.length) return null;
       const tried = new Set((d.passedFrom || []).concat([d.assignedTo]));
-      const start = pool.indexOf(d.assignedTo);
-      for (let i = 1; i <= pool.length; i++) {
-        const name = pool[(start + i + pool.length) % pool.length];
-        if (!tried.has(name)) return name;
+      for (let i = 0; i < queue.length; i++) {
+        if (!tried.has(queue[i])) return queue[i];
       }
       return '';
     }
@@ -4746,21 +5058,28 @@
       if (force && !confirm('Alihkan lead ini ke marketing berikutnya sekarang?')) return Promise.resolve();
       reassignInFlight.add(leadId);
       const ref = db.collection('leads').doc(leadId);
+      const rotRef = db.collection('settings').doc('adRotation');
       let result = null;
       return db.runTransaction(function (tx) {
         result = null;
-        return tx.get(ref).then(function (snap) {
+        return Promise.all([tx.get(ref), tx.get(rotRef)]).then(function (snaps) {
+          const snap = snaps[0];
           if (!snap.exists) return;
           const d = snap.data();
           if (d.pendingAccept !== true) return;
           if (!force && (d.acceptExhausted || acceptDeadlineMs(d) > Date.now())) return;
-          const next = nextAcceptCandidate(d);
+          const rot = snaps[1].exists ? snaps[1].data() : {};
+          const queue = normalizeRotationQueue(rot.queue, reassignPoolList(),
+            snaps[1].exists ? (Number(rot.counter) || 0) : currentRotationCounter());
+          const next = nextAcceptCandidate(d, queue);
           if (next === null) return;
           if (!next) {
             if (!d.acceptExhausted) tx.update(ref, { acceptExhausted: true });
             result = { exhausted: true, d: d };
             return;
           }
+          // Yang terlewat didahulukan untuk lead berikutnya; giliran penerima pengalihan dianggap terpakai.
+          tx.set(rotRef, { queue: applyReassignToQueue(queue, d.assignedTo, next), updatedAt: FieldValue.serverTimestamp() }, { merge: true });
           tx.update(ref, {
             assignedTo: next,
             passedFrom: FieldValue.arrayUnion(d.assignedTo),
@@ -5059,6 +5378,7 @@
             '<div class="flex flex-col items-end gap-1.5">' +
               '<span class="sla-pill sla-' + sla + ' whitespace-nowrap">' + escapeHtml(lead.status) + '</span>' +
               (lead.isHot ? '<span class="hot-badge hot-badge-sm">' + ICON_FIRE_SM + 'Hot Prospek</span>' : '') +
+              visitPillHtml(lead) +
             '</div>' +
           '</div>' +
           '<p class="text-xs text-[#6b7970] mt-2">' + slaCaption(lead) + '</p>' +
@@ -5181,6 +5501,13 @@
       document.getElementById('nextFollowUpDate').value = toDateInputValue(defaultNextFollowUp());
       document.getElementById('updateNote').value = '';
 
+      // Janji kunjungan: isi dengan janji yang tersimpan (kalau ada).
+      const visitDateInput = document.getElementById('visitDateInput');
+      visitDateInput.value = lead.visitDate || '';
+      visitDateInput.min = toDateInputValue(new Date());
+      document.getElementById('visitTimeInput').value = lead.visitTime || '';
+      document.getElementById('visitClearBtn').classList.toggle('hidden', !lead.visitDate);
+
       const overlay = document.getElementById('modalOverlay');
       const box = document.getElementById('modalBox');
       overlay.classList.remove('hidden', 'pointer-events-none');
@@ -5188,6 +5515,11 @@
       overlay.style.opacity = '1';
       box.style.opacity = '1';
       box.style.transform = 'scale(1)';
+    }
+
+    function clearVisitInputs() {
+      document.getElementById('visitDateInput').value = '';
+      document.getElementById('visitTimeInput').value = '';
     }
 
     function closeModal() {
@@ -5340,6 +5672,10 @@
       document.getElementById('detailModalFollowUp').textContent =
         formatDateID(toJsDate(lead.nextFollowUpDate || lead.lastUpdated || lead.createdAt));
       document.getElementById('detailModalWaLink').href = waLink(lead.waNumber);
+      const visitText = formatVisit(lead.visitDate, lead.visitTime);
+      document.getElementById('detailModalVisitWrap').classList.toggle('hidden', !visitText);
+      document.getElementById('detailModalVisit').textContent = visitText +
+        (visitText && lead.visitSetBy ? ' (dicatat ' + lead.visitSetBy + ')' : '');
 
       const noteWrap = document.getElementById('detailModalNoteWrap');
       const noteText = lead.csNote || lead.leadNote || '';
@@ -5353,6 +5689,12 @@
       const statusBadge = document.getElementById('detailModalStatus');
       statusBadge.textContent = lead.status;
       statusBadge.className = 'sla-pill sla-' + computeSla(lead) + ' whitespace-nowrap';
+
+      const dataType = leadDataType(lead);
+      const dataTypeEl = document.getElementById('detailModalDataType');
+      dataTypeEl.textContent = dataType.label;
+      dataTypeEl.className = 'data-type-pill data-type-' + dataType.key;
+      dataTypeEl.title = dataType.hint;
 
       updateDetailModalHotUI(!!lead.isHot);
 
@@ -5432,6 +5774,20 @@
       }
       const saveBtn = document.querySelector('#modalBox button[onclick="saveUpdate()"]');
 
+      // Janji kunjungan: hanya dikirim kalau berubah dari yang tersimpan.
+      const leadBefore = findLeadById(currentModalLeadId) || {};
+      const visitDate = document.getElementById('visitDateInput').value || '';
+      const visitTime = visitDate ? (document.getElementById('visitTimeInput').value || '') : '';
+      const visitChanged = visitDate !== (leadBefore.visitDate || '') || visitTime !== (leadBefore.visitTime || '');
+      if (!visitDate && document.getElementById('visitTimeInput').value && visitChanged) {
+        alert('Isi tanggal janji kunjungan dulu (jam boleh kosong).');
+        return;
+      }
+      if (visitChanged && visitDate && visitDate < toDateInputValue(new Date())) {
+        alert('Tanggal janji kunjungan sudah lewat. Pilih hari ini atau tanggal berikutnya.');
+        return;
+      }
+
       // Setiap update status ditambahkan sebagai entri baru ke riwayat (array 'notes'), tidak menimpa yang lama.
       // Catatan: 'date' di sini pakai Date lokal (bukan serverTimestamp), karena Firestore tidak
       // mengizinkan FieldValue.serverTimestamp() di dalam elemen array. Input catatan bebas (dengan
@@ -5442,6 +5798,9 @@
         status: newStatus,
         note: updateNote
       };
+      if (visitChanged) {
+        historyEntry.visit = visitDate ? formatVisit(visitDate, visitTime) : 'dibatalkan';
+      }
 
       const updatePayload = {
         status: newStatus,
@@ -5449,6 +5808,17 @@
         lastUpdated: FieldValue.serverTimestamp(),
         notes: FieldValue.arrayUnion(historyEntry)
       };
+      if (visitChanged && visitDate) {
+        updatePayload.visitDate = visitDate;
+        updatePayload.visitTime = visitTime;
+        updatePayload.visitSetAt = FieldValue.serverTimestamp();
+        updatePayload.visitSetBy = currentUser ? currentUser.name : '';
+      } else if (visitChanged) {
+        updatePayload.visitDate = FieldValue.delete();
+        updatePayload.visitTime = FieldValue.delete();
+        updatePayload.visitCancelled = formatVisit(leadBefore.visitDate, leadBefore.visitTime);
+        updatePayload.visitCancelledAt = FieldValue.serverTimestamp();
+      }
 
       if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = 'Menyimpan...'; }
 
@@ -5465,6 +5835,12 @@
           }
           logMarketingActivity('Update status ke ' + newStatus, updatedLead ? updatedLead.buyerName : '', updatedLeadId,
             oldStatus + ' \u2192 ' + newStatus + ' \u00b7 Catatan: ' + (updateNote.length > 120 ? updateNote.slice(0, 120) + '...' : updateNote));
+          if (visitChanged) {
+            // Push ke SPV/Manager: janji kunjungan baru/diubah, atau dibatalkan.
+            callNotify(visitDate ? 'visit-scheduled' : 'visit-cancelled', updatedLeadId);
+            logMarketingActivity(visitDate ? 'Janji kunjungan' : 'Batalkan kunjungan', updatedLead ? updatedLead.buyerName : '', updatedLeadId,
+              visitDate ? formatVisit(visitDate, visitTime) : (formatVisit(leadBefore.visitDate, leadBefore.visitTime) || '-'));
+          }
           closeModal();
         })
         .catch(function (err) {
