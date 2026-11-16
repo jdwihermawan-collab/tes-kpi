@@ -731,6 +731,10 @@
             Tes Push
           </button>
 
+          <button type="button" id="csBroadcastBtn" onclick="openBroadcastModal()" class="hidden btn-ghost text-xs sm:text-sm font-semibold px-3 py-2 rounded-lg inline-flex items-center gap-1.5" title="Kirim push notification peringatan atau pengumuman ke marketing">
+            Kirim Notif
+          </button>
+
           <div class="wa-menu">
             <button type="button" onclick="toggleWaMenu()" class="btn-ghost text-xs sm:text-sm font-semibold px-3 py-2 rounded-lg inline-flex items-center gap-1.5" title="Kirim pengingat lead follow-up hari ini ke marketing via WhatsApp">
               Kirim Pengingat
@@ -1594,6 +1598,39 @@
       <button type="button" id="testPushSendBtn" onclick="sendTestPush()" class="btn-primary text-white font-semibold text-sm w-full py-2.5 rounded-lg mt-3">Kirim Notifikasi</button>
       <button type="button" onclick="enablePushFromTestModal()" class="cancel-btn w-full font-semibold text-sm py-2.5 rounded-lg mt-2">Aktifkan Notifikasi di Perangkat Ini</button>
       <button type="button" onclick="closeTestPushModal()" class="cancel-btn w-full font-semibold text-sm py-2.5 rounded-lg mt-2">Tutup</button>
+    </div>
+  </div>
+
+  <!-- SPV/Manager & Super Admin: Kirim Notif (peringatan / pengumuman lewat push) -->
+  <div id="broadcastModalOverlay" class="fixed inset-0 bg-black/50 opacity-0 pointer-events-none z-50 flex hidden items-center justify-center px-4" onclick="closeBroadcastModal()" style="transition:opacity 0.2s ease;">
+    <div id="broadcastModalBox" class="bg-white rounded-2xl p-5 w-full max-w-md opacity-0 scale-95 max-h-[90vh] overflow-y-auto" onclick="event.stopPropagation()" style="transition:opacity 0.2s ease, transform 0.2s ease;">
+      <h3 class="font-bold text-lg mb-1">Kirim Notif</h3>
+      <p class="text-sm text-[var(--muted)] mb-4">Push notification ke HP tim, untuk peringatan atau pengumuman. Hanya sampai ke yang sudah menekan "Aktifkan Notifikasi".</p>
+      <p class="field-label">Template cepat</p>
+      <div id="broadcastTemplates" class="flex flex-wrap gap-2 mb-3"></div>
+      <label class="field-label" for="broadcastTarget">Kirim ke</label>
+      <select id="broadcastTarget" class="field-input mb-2" onchange="renderBroadcastPreview()">
+        <option value="due">Marketing yang belum follow-up hari ini</option>
+        <option value="marketing">Semua marketing</option>
+        <option value="groupA">Marketing Grup A</option>
+        <option value="groupB">Marketing Grup B</option>
+        <option value="pick">Pilih marketing...</option>
+        <option value="team">Semua tim (marketing + CS)</option>
+      </select>
+      <div id="broadcastPickList" class="hidden border border-[var(--line)] rounded-lg px-3 py-2 mb-2 max-h-40 overflow-y-auto"></div>
+      <p id="broadcastPreview" class="text-xs text-[var(--muted)] mb-3"></p>
+      <label class="field-label" for="broadcastTitle">Judul</label>
+      <input id="broadcastTitle" type="text" maxlength="80" class="field-input mb-3">
+      <label class="field-label" for="broadcastBody">Isi pesan</label>
+      <textarea id="broadcastBody" rows="4" maxlength="500" class="field-input"></textarea>
+      <p class="text-xs text-[var(--muted)] mt-1">{nama} dan {jumlah} (jumlah lead yang belum di-follow up) otomatis diganti untuk tiap penerima.</p>
+      <p id="broadcastResult" class="text-sm font-medium mt-3"></p>
+      <button type="button" id="broadcastSendBtn" onclick="sendBroadcast()" class="btn-primary text-white font-semibold text-sm w-full py-2.5 rounded-lg mt-3">Kirim Notifikasi</button>
+      <button type="button" onclick="closeBroadcastModal()" class="cancel-btn w-full font-semibold text-sm py-2.5 rounded-lg mt-2">Tutup</button>
+      <div class="border-t border-[var(--line)] mt-4 pt-3">
+        <p class="font-semibold text-sm mb-2">Riwayat kiriman</p>
+        <div id="broadcastHistory" class="space-y-2"></div>
+      </div>
     </div>
   </div>
 
@@ -3880,6 +3917,8 @@
       if (manageBtn) manageBtn.classList.add('hidden');
       const testPushBtn = document.getElementById('csTestPushBtn');
       if (testPushBtn) testPushBtn.classList.add('hidden');
+      const broadcastBtn = document.getElementById('csBroadcastBtn');
+      if (broadcastBtn) broadcastBtn.classList.add('hidden');
       if (role === 'CS') {
         document.getElementById('csHeaderTitle').textContent = APP.appName + ' - Panel CS';
         document.getElementById('csHeaderSubtitle').textContent = 'Panel CS';
@@ -3898,6 +3937,8 @@
         document.getElementById('csHistoryBtn').classList.toggle('hidden', isSuper);
         if (isSuper && manageBtn) manageBtn.classList.remove('hidden');
         if (isSuper && testPushBtn) testPushBtn.classList.remove('hidden');
+        // Kirim Notif (peringatan / pengumuman lewat push) untuk SPV/Manager & Super Admin.
+        if (broadcastBtn) broadcastBtn.classList.remove('hidden');
         showView('cs');
         startLeadsListenerCsAdmin();
       } else if (role === 'Marketing') {
@@ -4909,6 +4950,203 @@
       }).finally(function () {
         btn.disabled = false;
         btn.textContent = 'Kirim Notifikasi';
+      });
+    }
+
+    // ---------- SPV/Manager & Super Admin: Kirim Notif (peringatan / pengumuman) ----------
+    // Penerima akhir & penggantian {nama}/{jumlah} ditentukan server (api/broadcast.js).
+    // Pratinjau di sini dihitung dari lead yang sudah dimuat, tanpa baca Firestore tambahan.
+    const BROADCAST_TEMPLATES = [
+      { label: 'Pengingat sore', target: 'due', title: 'Pengingat Follow-Up Sore',
+        body: 'Halo {nama}, masih ada {jumlah} lead yang belum di-follow up hari ini. Yuk diselesaikan sebelum pulang ya!' },
+      { label: 'Pengumuman', target: 'marketing', title: 'Pengumuman', body: '' },
+      { label: 'Briefing / rapat', target: 'marketing', title: 'Briefing Tim',
+        body: 'Halo {nama}, ada briefing tim hari ini jam ... di kantor. Mohon hadir tepat waktu ya.' },
+      { label: 'Semangat closing', target: 'marketing', title: 'Semangat Closing!',
+        body: 'Halo {nama}, tetap semangat follow up buyer hari ini. Satu chat lagi bisa jadi closing berikutnya!' }
+    ];
+    const BROADCAST_TARGET_LABELS = {
+      due: 'marketing yang belum follow-up', marketing: 'semua marketing', groupA: 'marketing Grup A',
+      groupB: 'marketing Grup B', pick: 'marketing pilihan', team: 'semua tim (marketing + CS)'
+    };
+
+    function canBroadcast() {
+      return !!currentUser && (currentUser.role === 'Admin' || currentUser.role === 'SuperAdmin');
+    }
+
+    function openBroadcastModal() {
+      if (!canBroadcast()) return;
+      document.getElementById('broadcastTemplates').innerHTML = BROADCAST_TEMPLATES.map(function (t, i) {
+        return '<button type="button" onclick="applyBroadcastTemplate(' + i + ')" class="text-xs font-semibold px-3 py-1.5 rounded-full border border-[var(--line)]">' + escapeHtml(t.label) + '</button>';
+      }).join('');
+      document.getElementById('broadcastResult').textContent = '';
+      if (!document.getElementById('broadcastTitle').value.trim() && !document.getElementById('broadcastBody').value.trim()) {
+        applyBroadcastTemplate(0);
+      }
+      renderBroadcastPickList();
+      renderBroadcastPreview();
+      loadBroadcastHistory();
+      const overlay = document.getElementById('broadcastModalOverlay');
+      const box = document.getElementById('broadcastModalBox');
+      overlay.classList.remove('hidden', 'pointer-events-none');
+      void overlay.offsetWidth;
+      overlay.style.opacity = '1';
+      box.style.opacity = '1';
+      box.style.transform = 'scale(1)';
+    }
+
+    function closeBroadcastModal() {
+      const overlay = document.getElementById('broadcastModalOverlay');
+      const box = document.getElementById('broadcastModalBox');
+      overlay.style.opacity = '0';
+      box.style.opacity = '0';
+      box.style.transform = 'scale(0.95)';
+      overlay.classList.add('pointer-events-none');
+      setTimeout(function () { overlay.classList.add('hidden'); }, 200);
+    }
+
+    function applyBroadcastTemplate(i) {
+      const t = BROADCAST_TEMPLATES[i];
+      if (!t) return;
+      document.getElementById('broadcastTarget').value = t.target;
+      document.getElementById('broadcastTitle').value = t.title;
+      document.getElementById('broadcastBody').value = t.body;
+      document.getElementById('broadcastResult').textContent = '';
+      renderBroadcastPreview();
+    }
+
+    function renderBroadcastPickList() {
+      const box = document.getElementById('broadcastPickList');
+      const checked = new Set(Array.prototype.map.call(box.querySelectorAll('input:checked'), function (el) { return el.value; }));
+      const list = activeMarketingUsers();
+      box.innerHTML = list.length ? list.map(function (u) {
+        return '<label class="flex items-center gap-2 text-sm py-1"><input type="checkbox" value="' + escapeHtml(u.name) + '"' +
+          (checked.has(u.name) ? ' checked' : '') + ' onchange="renderBroadcastPreview()"> ' + escapeHtml(u.name) + '</label>';
+      }).join('') : '<p class="text-sm text-[var(--muted)]">Belum ada marketing aktif.</p>';
+    }
+
+    function broadcastPickedNames() {
+      return Array.prototype.map.call(document.querySelectorAll('#broadcastPickList input:checked'), function (el) { return el.value; });
+    }
+
+    // Jumlah lead belum di-follow up per marketing (aturan sama dengan lonceng & pengingat harian).
+    function broadcastDueCounts() {
+      const counts = {};
+      allLeadsData.forEach(function (l) {
+        if (!l.assignedTo || l.pendingAccept === true || !needsAttentionNow(l)) return;
+        counts[l.assignedTo] = (counts[l.assignedTo] || 0) + 1;
+      });
+      return counts;
+    }
+
+    function broadcastPreviewNames(target) {
+      const mk = activeMarketingUsers();
+      const names = function (list) { return list.map(function (u) { return u.name; }); };
+      if (target === 'due') {
+        const c = broadcastDueCounts();
+        return mk.filter(function (u) { return c[u.name] > 0; }).map(function (u) { return u.name + ' (' + c[u.name] + ')'; });
+      }
+      if (target === 'marketing') return names(mk);
+      if (target === 'groupA') return names(mk.filter(function (u) { return u.group !== 'B'; }));
+      if (target === 'groupB') return names(mk.filter(function (u) { return u.group === 'B'; }));
+      if (target === 'pick') return broadcastPickedNames();
+      if (target === 'team') {
+        return usersData.filter(function (u) { return isActiveUser(u) && u.name && (u.role === 'Marketing' || u.role === 'CS'); })
+          .map(function (u) { return u.name; }).sort();
+      }
+      return [];
+    }
+
+    function renderBroadcastPreview() {
+      const target = document.getElementById('broadcastTarget').value;
+      document.getElementById('broadcastPickList').classList.toggle('hidden', target !== 'pick');
+      const list = broadcastPreviewNames(target);
+      const el = document.getElementById('broadcastPreview');
+      if (!list.length) {
+        el.textContent = target === 'due' ? 'Saat ini semua marketing sudah follow-up hari ini.'
+          : target === 'pick' ? 'Centang marketing yang mau dikirimi.' : 'Tidak ada penerima.';
+        return;
+      }
+      el.textContent = (target === 'due' ? 'Belum follow-up (jumlah lead): ' : 'Penerima (' + list.length + '): ') + list.join(', ');
+    }
+
+    function broadcastApi(payload) {
+      return Promise.resolve().then(function () {
+        if (!auth.currentUser) throw new Error('Sesi login habis. Silakan keluar lalu masuk lagi.');
+        return auth.currentUser.getIdToken();
+      }).then(function (idToken) {
+        return fetch('/api/broadcast', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + idToken },
+          body: JSON.stringify(payload)
+        });
+      }).then(function (r) {
+        return r.text().then(function (t) {
+          let data = {};
+          try { data = JSON.parse(t); } catch (e) {}
+          if (!r.ok) {
+            throw new Error(data.error || (r.status === 404 ? 'Server notifikasi (api/broadcast) belum ter-deploy di Vercel.' : 'Server merespons ' + r.status));
+          }
+          return data;
+        });
+      });
+    }
+
+    function sendBroadcast() {
+      if (!canBroadcast()) return;
+      const btn = document.getElementById('broadcastSendBtn');
+      const resultEl = document.getElementById('broadcastResult');
+      const target = document.getElementById('broadcastTarget').value;
+      const title = document.getElementById('broadcastTitle').value.trim();
+      const body = document.getElementById('broadcastBody').value.trim();
+      const names = target === 'pick' ? broadcastPickedNames() : [];
+      resultEl.style.color = 'var(--red)';
+      if (!title || !body) { resultEl.textContent = 'Judul dan isi pesan wajib diisi.'; return; }
+      if (target === 'pick' && !names.length) { resultEl.textContent = 'Centang minimal satu marketing.'; return; }
+      if (!confirm('Kirim notifikasi "' + title + '" ke ' + BROADCAST_TARGET_LABELS[target] + '?')) return;
+      btn.disabled = true;
+      btn.textContent = 'Mengirim...';
+      resultEl.style.color = 'var(--muted)';
+      resultEl.textContent = '';
+      broadcastApi({ action: 'send', target: target, names: names, title: title, body: body }).then(function (data) {
+        if (!data.recipients) {
+          resultEl.style.color = 'var(--muted)';
+          resultEl.textContent = data.info || 'Tidak ada penerima.';
+          return;
+        }
+        resultEl.style.color = data.sent ? '#1f8a5c' : 'var(--red)';
+        resultEl.textContent = 'Terkirim ke ' + data.recipients + ' orang (' + data.sent + ' dari ' + data.devices + ' perangkat).' +
+          (data.noDevice && data.noDevice.length ? ' Belum mengaktifkan notifikasi: ' + data.noDevice.join(', ') + '.' : '');
+        loadBroadcastHistory();
+      }).catch(function (err) {
+        resultEl.style.color = 'var(--red)';
+        resultEl.textContent = 'Gagal: ' + (err && err.message);
+      }).finally(function () {
+        btn.disabled = false;
+        btn.textContent = 'Kirim Notifikasi';
+      });
+    }
+
+    function loadBroadcastHistory() {
+      const el = document.getElementById('broadcastHistory');
+      el.innerHTML = '<p class="text-xs text-[var(--muted)]">Memuat...</p>';
+      broadcastApi({ action: 'history' }).then(function (data) {
+        const items = data.items || [];
+        if (!items.length) {
+          el.innerHTML = '<p class="text-xs text-[var(--muted)]">Belum ada notif yang dikirim.</p>';
+          return;
+        }
+        el.innerHTML = items.map(function (b) {
+          const when = b.createdAt ? new Date(b.createdAt).toLocaleString('id-ID', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : '';
+          return '<div class="border border-[var(--line)] rounded-lg px-3 py-2">' +
+            '<div class="flex items-start justify-between gap-2"><span class="font-semibold text-sm">' + escapeHtml(b.title) + '</span>' +
+            '<span class="text-xs text-[var(--muted)] whitespace-nowrap">' + escapeHtml(when) + '</span></div>' +
+            '<p class="text-xs text-[var(--muted)] mt-0.5">' + escapeHtml(b.senderName) + ' &middot; ' + escapeHtml(b.targetLabel) +
+            ' &middot; ' + b.recipientCount + ' penerima</p>' +
+            '<p class="text-xs mt-1 break-words">' + escapeHtml(b.body) + '</p></div>';
+        }).join('');
+      }).catch(function (err) {
+        el.innerHTML = '<p class="text-xs" style="color:var(--red);">' + escapeHtml('Gagal memuat riwayat: ' + (err && err.message)) + '</p>';
       });
     }
 
