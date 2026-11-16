@@ -5264,9 +5264,17 @@
       const lead = acceptedModalLead;
       if (!lead) return;
       const project = lead.project || 'kami';
-      const message = 'Halo Bapak/Ibu ' + (lead.buyerName || '') + ', perkenalkan saya ' + (currentUser ? currentUser.name : '') +
-        ' dari ' + project + '. Terima kasih sudah menghubungi kami. Ada yang bisa saya bantu terkait informasi ' + project + '?';
-      window.open('https://wa.me/' + toWaDigits(lead.waNumber) + '?text=' + encodeURIComponent(message), '_blank');
+      const buyer = lead.buyerName || 'Bapak/Ibu';
+      const marketing = currentUser ? currentUser.name : '';
+      const smile = '\u263A\uFE0F';
+      const message = 'Halo!' + smile + '\n' +
+        'Dengan ' + buyer + ', perkenalkan saya ' + marketing + ' marketing executive ' + project + '.\n' +
+        'Terima kasih banyak atas ketertarikannya terhadap perumahan kami.\n' +
+        'Kalau boleh tau ibu lagi cari hunian atau investasi?\n' +
+        'Kalau ada yang ingin ditanyakan terkait unit, kavling atau spesifikasi pembayaran\n' +
+        'Dengan senang hati ' + marketing + ' siap membantu ' + buyer + ' ' + smile;
+      // api.whatsapp.com/send dipakai (bukan wa.me) supaya emoji tidak berubah jadi tanda tanya.
+      window.open('https://api.whatsapp.com/send?phone=' + toWaDigits(lead.waNumber) + '&text=' + encodeURIComponent(message), '_blank');
     }
 
     // Hitung mundur diperbarui tiap detik tanpa me-render ulang kartu (supaya tombol tetap bisa ditekan).
