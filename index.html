@@ -1454,6 +1454,7 @@
       <div class="cs-input-tabbar mb-4" role="tablist">
         <button type="button" id="manageTabUsersBtn" onclick="switchManageTab('users')" class="cs-input-tab-btn cs-input-tab-active" role="tab">Akun</button>
         <button type="button" id="manageTabProjectsBtn" onclick="switchManageTab('projects')" class="cs-input-tab-btn" role="tab">Proyek</button>
+        <button type="button" id="manageTabResetBtn" onclick="switchManageTab('reset')" class="cs-input-tab-btn" role="tab">Reset Data</button>
       </div>
       <div id="manageContent"></div>
     </div>
@@ -6410,14 +6411,145 @@
         : '';
     }
 
+    // ---------- Super Admin: Reset Data (hapus data uji coba) ----------
+    // Penghapusan dilakukan server (api/reset-data.js). Akun, daftar proyek, dan pengaturan tidak ikut dihapus.
+    const RESET_ITEMS = [
+      { key: 'leads', label: 'Data buyer / lead', required: true,
+        hint: 'Semua lead dari input CS dan input mandiri marketing, beserta riwayat follow-up dan janji kunjungannya.' },
+      { key: 'spam', label: 'Nomor spam', hint: 'Input Spam dari CS (tampil di Riwayat).' },
+      { key: 'reminderLogs', label: 'Log pengingat WA', hint: 'Catatan siapa yang mengingatkan marketing lewat WA.' },
+      { key: 'activity', label: 'Aktivitas marketing', hint: 'Catatan login dan update data tiap marketing.' },
+      { key: 'broadcasts', label: 'Riwayat Kirim Notif', hint: 'Daftar notif/pengumuman yang pernah dikirim.' },
+      { key: 'rotation', label: 'Antrean giliran rotasi', noCount: true, hint: 'Giliran lead dimulai lagi dari marketing urutan pertama.' }
+    ];
+    let resetState = { counts: null, loading: false, error: '', checked: {} };
+
+    function resetApi(payload) {
+      return Promise.resolve().then(function () {
+        if (!auth.currentUser) throw new Error('Sesi login habis. Silakan keluar lalu masuk lagi.');
+        return auth.currentUser.getIdToken();
+      }).then(function (idToken) {
+        return fetch('/api/reset-data', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + idToken },
+          body: JSON.stringify(payload)
+        });
+      }).then(function (r) {
+        return r.text().then(function (t) {
+          let data = {};
+          try { data = JSON.parse(t); } catch (e) {}
+          if (!r.ok) {
+            throw new Error(data.error || (r.status === 404 ? 'Server (api/reset-data) belum ter-deploy di Vercel.' : 'Server merespons ' + r.status));
+          }
+          return data;
+        });
+      });
+    }
+
+    function loadResetCounts() {
+      if (manageBusy) return;
+      resetState.loading = true;
+      resetState.error = '';
+      resetState.counts = null;
+      if (manageModalOpen && manageTab === 'reset') renderManageModal();
+      resetApi({ action: 'count' }).then(function (d) {
+        resetState.counts = d.counts || {};
+      }).catch(function (err) {
+        resetState.error = (err && err.message) || String(err);
+      }).finally(function () {
+        resetState.loading = false;
+        if (manageModalOpen && manageTab === 'reset' && !manageBusy) renderManageModal();
+      });
+    }
+
+    function setResetItem(key, on) { resetState.checked[key] = !!on; }
+
+    function selectedResetItems() {
+      return RESET_ITEMS.filter(function (it) { return it.required || resetState.checked[it.key]; });
+    }
+
+    function renderResetPanel() {
+      const c = resetState.counts;
+      const rows = RESET_ITEMS.map(function (it) {
+        let n = '';
+        if (!it.noCount) {
+          if (c) n = ' <span class="text-xs text-[var(--muted)]">(' + (c[it.key] || 0) + ' data)</span>';
+          else if (resetState.loading) n = ' <span class="text-xs text-[var(--muted)]">(menghitung...)</span>';
+        }
+        return '<label class="flex items-start gap-2.5 py-2"' + (it.key !== 'leads' ? ' style="border-top:1px solid var(--line);"' : '') + '>' +
+          '<input type="checkbox" class="mt-1"' + (it.required || resetState.checked[it.key] ? ' checked' : '') + (it.required ? ' disabled' : '') +
+          ' onchange="setResetItem(\'' + it.key + '\', this.checked)">' +
+          '<span><span class="font-semibold text-sm">' + escapeHtml(it.label) + '</span>' + n +
+          (it.required ? ' <span class="text-xs font-semibold" style="color:var(--red);">wajib</span>' : '') +
+          '<span class="block text-xs text-[var(--muted)] mt-0.5">' + escapeHtml(it.hint) + '</span></span></label>';
+      }).join('');
+      return manageNoticeHtml() +
+        '<div class="rounded-lg px-3 py-2.5 mb-3 text-sm" style="background:var(--red-bg);color:var(--red);border:1px solid rgba(163,53,44,0.25);">' +
+          '<b>Hapus permanen, tidak bisa dibatalkan.</b> Pakai untuk membersihkan data uji coba sebelum mulai memasukkan data asli.</div>' +
+        '<p class="text-sm text-[var(--muted)] mb-3">Yang <b>tidak</b> dihapus: semua akun (marketing, CS, SPV/Manager, Super Admin), daftar proyek, dan pengaturan.</p>' +
+        (resetState.error ? '<p class="text-sm mb-2" style="color:var(--red);">' + escapeHtml('Gagal menghitung data: ' + resetState.error) + '</p>' : '') +
+        '<div class="border border-[var(--line)] rounded-lg px-3 mb-3">' + rows + '</div>' +
+        '<label class="field-label" for="resetConfirmInput">Ketik RESET untuk konfirmasi</label>' +
+        '<input id="resetConfirmInput" type="text" autocomplete="off" class="field-input mb-3" placeholder="RESET">' +
+        '<p id="resetProgress" class="text-sm font-medium mb-2"></p>' +
+        '<div class="flex flex-wrap gap-2">' + manageBtn('Hapus Data Sekarang', 'runDataReset()', 'danger') + manageBtn('Hitung Ulang', 'loadResetCounts()') + '</div>';
+    }
+
+    function runDataReset() {
+      if (!isSuperAdminUser() || manageBusy) return;
+      const input = document.getElementById('resetConfirmInput');
+      const progress = document.getElementById('resetProgress');
+      if (!input || input.value.trim() !== 'RESET') {
+        progress.style.color = 'var(--red)';
+        progress.textContent = 'Ketik RESET (huruf besar semua) untuk konfirmasi.';
+        return;
+      }
+      const chosen = selectedResetItems();
+      const items = chosen.map(function (it) { return it.key; });
+      if (!confirm('Yakin hapus permanen: ' + chosen.map(function (it) { return it.label; }).join(', ') +
+        '?\n\nData yang sudah dihapus tidak bisa dikembalikan. Akun dan daftar proyek tetap ada.')) return;
+      setManageBusy(true);
+      progress.style.color = 'var(--muted)';
+      progress.textContent = 'Menghapus data...';
+      const total = {};
+      const sum = function () { return Object.keys(total).reduce(function (s, k) { return s + total[k]; }, 0); };
+      function step(round) {
+        return resetApi({ action: 'reset', confirm: 'RESET', items: items }).then(function (d) {
+          Object.keys(d.deleted || {}).forEach(function (k) { total[k] = (total[k] || 0) + d.deleted[k]; });
+          progress.textContent = 'Menghapus data... ' + sum() + ' data terhapus';
+          if (d.more && round < 200) return step(round + 1);
+          if (d.more) throw new Error('Data masih tersisa. Tekan Hapus Data Sekarang sekali lagi untuk melanjutkan.');
+        });
+      }
+      step(1).then(function () {
+        const parts = chosen.filter(function (it) { return !it.noCount; }).map(function (it) { return it.label + ' ' + (total[it.key] || 0); });
+        if (items.indexOf('rotation') !== -1) parts.push('antrean rotasi dimulai ulang');
+        manageNotice = 'Reset selesai: ' + parts.join(', ') + '. Akun dan daftar proyek tetap ada.';
+        resetState = { counts: null, loading: false, error: '', checked: {} };
+        setManageBusy(false);
+        loadResetCounts();
+      }).catch(function (err) {
+        setManageBusy(false);
+        progress.style.color = 'var(--red)';
+        progress.textContent = 'Gagal: ' + ((err && err.message) || err) + (sum() ? ' (' + sum() + ' data sudah terhapus)' : '');
+      });
+    }
+
     function renderManageModal() {
       const usersBtn = document.getElementById('manageTabUsersBtn');
       const projBtn = document.getElementById('manageTabProjectsBtn');
       if (usersBtn) usersBtn.classList.toggle('cs-input-tab-active', manageTab === 'users');
       if (projBtn) projBtn.classList.toggle('cs-input-tab-active', manageTab === 'projects');
+      const resetBtn = document.getElementById('manageTabResetBtn');
+      if (resetBtn) resetBtn.classList.toggle('cs-input-tab-active', manageTab === 'reset');
       const el = document.getElementById('manageContent');
       if (!el) return;
       if (manageTab === 'projects') { el.innerHTML = renderProjectsPanel(); return; }
+      if (manageTab === 'reset') {
+        el.innerHTML = renderResetPanel();
+        if (!resetState.counts && !resetState.loading && !resetState.error) loadResetCounts();
+        return;
+      }
       // Kelola Akun memeriksa SEMUA lead milik tiap akun (termasuk Closed/Lost lama, mis. untuk
       // mengunci nama, menonaktifkan, dan Hapus Permanen), jadi data lead lengkap dimuat dulu.
       if (!allLeadsReady) {
