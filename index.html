@@ -733,6 +733,10 @@
             Tes Push
           </button>
 
+          <button type="button" id="csKpiBtn" onclick="openKpiModal()" class="hidden btn-ghost text-xs sm:text-sm font-semibold px-3 py-2 rounded-lg inline-flex items-center gap-1.5" title="Pencapaian KPI bulanan setiap marketing">
+            KPI
+          </button>
+
           <button type="button" id="csBroadcastBtn" onclick="openBroadcastModal()" class="hidden btn-ghost text-xs sm:text-sm font-semibold px-3 py-2 rounded-lg inline-flex items-center gap-1.5" title="Kirim push notification peringatan atau pengumuman ke marketing">
             Kirim Notif
           </button>
@@ -989,7 +993,8 @@
                     <option value="Follow-Up 2">Follow-Up 2</option>
                     <option value="Follow-Up 3">Follow-Up 3</option>
                     <option value="Site Visit">Site Visit</option>
-                    <option value="Closed (Deal)">Closed (Deal)</option>
+                    <option value="Closing ITJ">Closing ITJ</option>
+                    <option value="Closing SPPR">Closing SPPR</option>
                     <option value="Lost (Batal)">Lost (Batal)</option>
                     <option value="Lain-lain">Lain-lain</option>
                   </select>
@@ -1096,6 +1101,15 @@
     </header>
 
     <main class="px-4 pt-5 space-y-4 max-w-md mx-auto">
+      <!-- KPI Saya: pencapaian KPI bulan ini + lapor Live TikTok / Canvasing -->
+      <button type="button" onclick="openKpiModal()" class="w-full bg-white border border-[var(--line)] rounded-xl px-3.5 py-3 flex items-center justify-between gap-3 text-left">
+        <span>
+          <span class="block text-sm font-bold">KPI Saya</span>
+          <span class="block text-xs text-[var(--muted)] mt-0.5">Lihat pencapaian bulan ini &amp; lapor Live TikTok / Canvasing</span>
+        </span>
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" class="flex-shrink-0"><path d="M9 6l6 6-6 6" stroke="#5c6b62" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+
       <!-- Lead baru yang menunggu ditekan "Terima" (batas waktu 5 menit). Diisi JS. -->
       <div id="marketingPendingContainer" class="hidden space-y-3"></div>
 
@@ -1130,7 +1144,8 @@
                 <option value="Follow-Up 2">Follow-Up 2</option>
                 <option value="Follow-Up 3">Follow-Up 3</option>
                 <option value="Site Visit">Site Visit</option>
-                <option value="Closed (Deal)">Closed (Deal)</option>
+                <option value="Closing ITJ">Closing ITJ</option>
+                <option value="Closing SPPR">Closing SPPR</option>
                 <option value="Lost (Batal)">Lost (Batal)</option>
                 <option value="Lain-lain">Lain-lain</option>
               </select>
@@ -1303,7 +1318,8 @@
           <option value="Follow-Up 2">Follow-Up 2</option>
           <option value="Follow-Up 3">Follow-Up 3</option>
           <option value="Site Visit">Site Visit</option>
-          <option value="Closed (Deal)">Closed (Deal)</option>
+          <option value="Closing ITJ">Closing ITJ</option>
+          <option value="Closing SPPR">Closing SPPR</option>
           <option value="Lost (Batal)">Lost (Batal)</option>
           <option value="Lain-lain">Lain-lain</option>
         </select>
@@ -1405,6 +1421,18 @@
       <div id="reminderLogList" class="space-y-2"></div>
       <div class="flex items-center gap-3 mt-4">
         <button type="button" onclick="closeReminderLogModal()" class="btn-primary text-white font-semibold text-sm px-4 py-2.5 rounded-lg flex-1">Tutup</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============================================================ -->
+  <!-- MODAL KPI MARKETING: isi di-render renderKpi()                -->
+  <!-- ============================================================ -->
+  <div id="kpiOverlay" class="fixed inset-0 bg-black/50 opacity-0 pointer-events-none z-40 flex hidden items-center justify-center px-4" onclick="closeKpiModal()" style="transition:opacity 0.2s ease;">
+    <div id="kpiBox" class="bg-white rounded-2xl p-5 w-full max-w-lg opacity-0 scale-95 max-h-[88vh] overflow-y-auto" onclick="event.stopPropagation()" style="transition:opacity 0.2s ease, transform 0.2s ease;">
+      <div id="kpiBody"></div>
+      <div class="flex items-center gap-3 mt-4">
+        <button type="button" onclick="closeKpiModal()" class="btn-primary text-white font-semibold text-sm px-4 py-2.5 rounded-lg flex-1">Tutup</button>
       </div>
     </div>
   </div>
@@ -2157,7 +2185,8 @@
     const ICON_FIRE = '<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12.5 2c.3 2.2-.6 3.6-2 5-1.6 1.6-3 3.3-3 5.8a4.5 4.5 0 0 0 9 0c0-1-.3-1.8-.7-2.6.9.5 1.7 1.4 1.7 3.1a5.5 5.5 0 0 1-11 0C6.5 9.3 8.7 7 10.3 5.3 11.4 4.1 12.6 3 12.5 2Z"/></svg>';
     const ICON_FIRE_SM = '<svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor"><path d="M12.5 2c.3 2.2-.6 3.6-2 5-1.6 1.6-3 3.3-3 5.8a4.5 4.5 0 0 0 9 0c0-1-.3-1.8-.7-2.6.9.5 1.7 1.4 1.7 3.1a5.5 5.5 0 0 1-11 0C6.5 9.3 8.7 7 10.3 5.3 11.4 4.1 12.6 3 12.5 2Z"/></svg>';
 
-    const CLOSED_STATUSES = ['Closed (Deal)', 'Lost (Batal)'];
+    // 'Closed (Deal)' = nama lama status Closing SPPR (tetap dianggap selesai untuk data lama).
+    const CLOSED_STATUSES = ['Closing SPPR', 'Closed (Deal)', 'Lost (Batal)'];
 
     let csInputMode = 'umum'; // 'umum' | 'iklan' | 'spam' — mode aktif form Input Lead Baru di Panel CS/Admin
 
@@ -2351,7 +2380,7 @@
 
     function slaCaption(lead) {
       if (CLOSED_STATUSES.indexOf(lead.status) !== -1) {
-        return lead.status === 'Closed (Deal)' ? 'Deal sudah closing' : 'Lead ditandai batal';
+        return lead.status === 'Lost (Batal)' ? 'Lead ditandai batal' : 'Deal sudah closing SPPR';
       }
       if (lead.status === 'New') return 'Lead baru, belum pernah di-chat &ndash; segera hubungi sekarang';
       const follow = toJsDate(lead.nextFollowUpDate || lead.lastUpdated || lead.createdAt);
@@ -2982,6 +3011,459 @@
           '</button>' + detail +
         '</div>';
       }).join('');
+    }
+
+    // ------------------------------------------------------------
+    // KPI MARKETING (per bulan)
+    // Target & bobot tersimpan di settings/kpi (diatur Super Admin); kalau belum ada, pakai KPI_DEFAULTS.
+    // Cara menghitung setiap indikator (semua per marketing, per bulan kalender):
+    //  - online   : laporan Live TikTok (online) / Canvasing (offline) di kpiReports/{uid}/kpiItems.
+    //               Dihitung per tanggal: beberapa laporan di hari yang sama tetap 1 kali.
+    //  - dbBaru   : lead Input Mandiri (isSelfInput) yang masuk bulan ini.
+    //  - followUp : jumlah Update Status (entri riwayat 'notes') bulan ini pada lead miliknya.
+    //  - survey   : lead yang PERTAMA KALI mencapai Site Visit (atau langsung tahap closing) bulan ini.
+    //  - walkIn   : lead bersumber Walk-in / Datang Langsung yang masuk bulan ini.
+    //  - itj      : lead yang pertama kali mencapai Closing ITJ (atau langsung Closing SPPR) bulan ini.
+    //  - sppr     : lead yang pertama kali mencapai Closing SPPR bulan ini.
+    // Satu lead hanya dihitung sekali per tahap, walaupun statusnya bolak-balik.
+    // Skor per indikator = min(capaian / target, 1) x bobot, jadi total maksimal 100.
+    // ------------------------------------------------------------
+    const KPI_DEFAULTS = [
+      { key: 'online', label: 'Online/Offline', unit: 'kali', target: 26, weight: 10, hint: 'Laporan Live TikTok (online) atau Canvasing (offline). Maksimal 1 hitungan per hari.' },
+      { key: 'dbBaru', label: 'Database Baru', unit: 'database', target: 78, weight: 10, hint: 'Lead Input Mandiri yang masuk bulan ini (3 per hari x 26 hari).' },
+      { key: 'followUp', label: 'Follow Up User', unit: 'kali', target: 250, weight: 10, hint: 'Setiap kali Update Status lead bulan ini.' },
+      { key: 'survey', label: 'User Survey', unit: 'user', target: 4, weight: 15, hint: 'Lead yang pertama kali masuk status Site Visit bulan ini.' },
+      { key: 'walkIn', label: 'User WI', unit: 'user', target: 2, weight: 5, hint: 'Lead dengan sumber Walk-in / Datang Langsung yang masuk bulan ini.' },
+      { key: 'itj', label: 'Closing ITJ', unit: 'user', target: 1, weight: 15, hint: 'Lead yang pertama kali masuk status Closing ITJ bulan ini.' },
+      { key: 'sppr', label: 'Closing SPPR', unit: 'user', target: 1, weight: 35, hint: 'Lead yang pertama kali masuk status Closing SPPR bulan ini.' }
+    ];
+    const KPI_SURVEY_STATUSES = ['Site Visit', 'Closing ITJ', 'Closing SPPR', 'Closed (Deal)'];
+    const KPI_ITJ_STATUSES = ['Closing ITJ', 'Closing SPPR', 'Closed (Deal)'];
+    const KPI_SPPR_STATUSES = ['Closing SPPR', 'Closed (Deal)'];
+    const KPI_REPORT_TYPES = [
+      { value: 'Live TikTok', label: 'Live TikTok (Online)' },
+      { value: 'Canvasing', label: 'Canvasing (Offline)' }
+    ];
+    const KPI_MONTH_NAMES = ['Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni', 'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'];
+
+    let kpiModalOpen = false;
+    let kpiConfig = null;        // isi dokumen settings/kpi (null = pakai default)
+    let kpiMonth = '';           // 'yyyy-mm'
+    let kpiView = 'list';        // 'list' (semua marketing) | 'detail' (satu marketing) | 'settings' (atur target)
+    let kpiDetailIndex = 0;
+    let kpiData = null;          // { month, rows: [{ uid, name, counts, reports }] }
+    let kpiLoading = false;
+    let kpiError = '';
+    let kpiLoadSeq = 0;
+    let kpiSaving = false;
+
+    function kpiIsMarketing() { return !!currentUser && currentUser.role === 'Marketing'; }
+    function kpiCanView() { return !!currentUser && (currentUser.role === 'Marketing' || currentUser.role === 'Admin' || currentUser.role === 'SuperAdmin'); }
+
+    function kpiItems() {
+      const saved = (kpiConfig && kpiConfig.items) || {};
+      return KPI_DEFAULTS.map(function (d) {
+        const s = saved[d.key] || {};
+        const t = Number(s.target);
+        const w = Number(s.weight);
+        return Object.assign({}, d, {
+          target: Number.isFinite(t) && t > 0 ? t : d.target,
+          weight: s.weight != null && s.weight !== '' && Number.isFinite(w) && w >= 0 ? w : d.weight
+        });
+      });
+    }
+
+    function kpiDateKey(d) {
+      return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+    }
+    function kpiCurrentMonth() { return kpiDateKey(new Date()).slice(0, 7); }
+    function kpiMonthLabel(ym) {
+      const p = String(ym).split('-');
+      return (KPI_MONTH_NAMES[Number(p[1]) - 1] || '') + ' ' + p[0];
+    }
+    function kpiMonthRange(ym) {
+      const p = String(ym).split('-');
+      const y = Number(p[0]);
+      const m = Number(p[1]) - 1;
+      return { start: new Date(y, m, 1), end: new Date(y, m + 1, 1), firstKey: ym + '-01', lastKey: ym + '-31' };
+    }
+    function kpiMonthOptions() {
+      const out = [];
+      const now = new Date();
+      for (let i = 0; i < 12; i++) {
+        out.push(kpiDateKey(new Date(now.getFullYear(), now.getMonth() - i, 1)).slice(0, 7));
+      }
+      return out;
+    }
+    function kpiFmt(n) {
+      const r = Math.round(n * 10) / 10;
+      return String(r).replace('.', ',');
+    }
+
+    // Hitung indikator yang bersumber dari data lead (semua kecuali online/offline).
+    function kpiCountLeads(leads, range) {
+      const c = { dbBaru: 0, followUp: 0, survey: 0, walkIn: 0, itj: 0, sppr: 0 };
+      const inRange = function (d) { return !!d && d >= range.start && d < range.end; };
+      leads.forEach(function (l) {
+        if (l.pendingAccept === true) return;   // belum diterima marketing: belum dihitung
+        const created = l.createdAt ? toJsDate(l.createdAt) : null;
+        if (inRange(created)) {
+          if (l.isSelfInput === true) c.dbBaru++;
+          if (/walk.?in/i.test(String(l.adSource || ''))) c.walkIn++;
+        }
+        let firstSurvey = null, firstItj = null, firstSppr = null;
+        (Array.isArray(l.notes) ? l.notes : []).forEach(function (n) {
+          if (!n || !n.date) return;
+          const d = toJsDate(n.date);
+          if (isNaN(d.getTime())) return;
+          if (inRange(d)) c.followUp++;
+          if (KPI_SURVEY_STATUSES.indexOf(n.status) !== -1 && (!firstSurvey || d < firstSurvey)) firstSurvey = d;
+          if (KPI_ITJ_STATUSES.indexOf(n.status) !== -1 && (!firstItj || d < firstItj)) firstItj = d;
+          if (KPI_SPPR_STATUSES.indexOf(n.status) !== -1 && (!firstSppr || d < firstSppr)) firstSppr = d;
+        });
+        if (inRange(firstSurvey)) c.survey++;
+        if (inRange(firstItj)) c.itj++;
+        if (inRange(firstSppr)) c.sppr++;
+      });
+      return c;
+    }
+
+    function kpiScore(counts, items) {
+      let total = 0;
+      const parts = items.map(function (it) {
+        const actual = Number(counts[it.key]) || 0;
+        const ratio = it.target > 0 ? Math.min(actual / it.target, 1) : 0;
+        const pts = ratio * it.weight;
+        total += pts;
+        return { item: it, actual: actual, ratio: ratio, pts: pts };
+      });
+      return { parts: parts, total: total };
+    }
+
+    function kpiReportsRef(uid) {
+      return db.collection('kpiReports').doc(uid).collection('kpiItems');
+    }
+
+    function openKpiModal() {
+      if (!kpiCanView()) return;
+      if (typeof closeWaMenu === 'function') closeWaMenu();
+      kpiModalOpen = true;
+      kpiMonth = kpiCurrentMonth();
+      kpiView = kpiIsMarketing() ? 'detail' : 'list';
+      kpiDetailIndex = 0;
+      kpiData = null;
+      loadKpiData();
+      const overlay = document.getElementById('kpiOverlay');
+      const box = document.getElementById('kpiBox');
+      overlay.classList.remove('hidden', 'pointer-events-none');
+      void overlay.offsetWidth;
+      overlay.style.opacity = '1';
+      box.style.opacity = '1';
+      box.style.transform = 'scale(1)';
+    }
+
+    function closeKpiModal() {
+      kpiModalOpen = false;
+      kpiLoadSeq++;
+      const overlay = document.getElementById('kpiOverlay');
+      const box = document.getElementById('kpiBox');
+      if (!overlay || !box) return;
+      overlay.style.opacity = '0';
+      box.style.opacity = '0';
+      box.style.transform = 'scale(0.95)';
+      overlay.classList.add('pointer-events-none');
+      setTimeout(function () { if (!kpiModalOpen) overlay.classList.add('hidden'); }, 200);
+    }
+
+    function onKpiMonthChange(value) {
+      kpiMonth = value || kpiCurrentMonth();
+      loadKpiData();
+    }
+
+    function loadKpiData() {
+      if (!currentUser) return;
+      const seq = ++kpiLoadSeq;
+      const month = kpiMonth;
+      const range = kpiMonthRange(month);
+      const isMk = kpiIsMarketing();
+      const people = isMk
+        ? [{ uid: currentUser.uid, name: currentUser.name }]
+        : activeMarketingUsers().map(function (u) { return { uid: u.uid, name: u.name }; });
+      kpiLoading = true;
+      kpiError = '';
+      renderKpi();
+
+      const cfgP = db.collection('settings').doc('kpi').get()
+        .then(function (s) { kpiConfig = s.exists ? s.data() : null; })
+        .catch(function (err) { console.error('Gagal memuat pengaturan KPI:', err); });
+      // Marketing: semua lead miliknya. SPV/Super Admin: lead yang berubah sejak awal bulan terpilih
+      // (lead yang punya kejadian di bulan itu pasti lastUpdated-nya >= awal bulan).
+      const leadsP = isMk
+        ? db.collection('leads').where('assignedTo', '==', currentUser.name).get()
+        : db.collection('leads').where('lastUpdated', '>=', range.start).get();
+      const reportsP = Promise.all(people.map(function (p) {
+        return kpiReportsRef(p.uid).where('dateKey', '>=', range.firstKey).where('dateKey', '<=', range.lastKey).get()
+          .then(function (snap) { return snap.docs.map(function (d) { return Object.assign({ id: d.id }, d.data({ serverTimestamps: 'estimate' })); }); })
+          .catch(function (err) { console.error('Gagal memuat laporan KPI ' + p.name + ':', err); return []; });
+      }));
+
+      Promise.all([cfgP, leadsP, reportsP]).then(function (res) {
+        if (seq !== kpiLoadSeq) return;
+        const leads = res[1].docs.map(function (d) { return Object.assign({ id: d.id }, d.data()); });
+        const reportLists = res[2];
+        const rows = people.map(function (p, i) {
+          const counts = kpiCountLeads(leads.filter(function (l) { return l.assignedTo === p.name; }), range);
+          const reports = reportLists[i].slice().sort(function (a, b) {
+            return a.dateKey === b.dateKey ? toJsDate(b.createdAt) - toJsDate(a.createdAt) : (a.dateKey < b.dateKey ? 1 : -1);
+          });
+          counts.online = new Set(reports.map(function (r) { return r.dateKey; })).size;
+          return { uid: p.uid, name: p.name, counts: counts, reports: reports };
+        });
+        kpiData = { month: month, rows: rows };
+        kpiLoading = false;
+        renderKpi();
+      }).catch(function (err) {
+        if (seq !== kpiLoadSeq) return;
+        console.error('Gagal memuat KPI:', err);
+        kpiLoading = false;
+        kpiError = err.message || String(err);
+        renderKpi();
+      });
+    }
+
+    function kpiBarHtml(ratio) {
+      const pct = Math.round(Math.max(0, Math.min(ratio, 1)) * 100);
+      const color = pct >= 100 ? 'var(--green, #1f8a5c)' : pct >= 50 ? 'var(--brand)' : '#d9822b';
+      return '<div class="h-2 rounded-full bg-[var(--line)] overflow-hidden"><div class="h-full rounded-full" style="width:' + pct + '%;background:' + color + ';"></div></div>';
+    }
+
+    function renderKpi() {
+      const body = document.getElementById('kpiBody');
+      if (!body || !kpiModalOpen) return;
+      const items = kpiItems();
+      const isMk = kpiIsMarketing();
+      const isSuper = currentUser && currentUser.role === 'SuperAdmin';
+
+      const monthSelect = '<select id="kpiMonthSelect" onchange="onKpiMonthChange(this.value)" class="field-input" style="width:auto;" aria-label="Pilih bulan">' +
+        kpiMonthOptions().map(function (ym) {
+          return '<option value="' + ym + '"' + (ym === kpiMonth ? ' selected' : '') + '>' + kpiMonthLabel(ym) + '</option>';
+        }).join('') + '</select>';
+
+      let head = '<div class="flex flex-wrap items-center justify-between gap-2 mb-3">' +
+        '<h3 class="font-bold text-lg">' + (isMk ? 'KPI Saya' : 'KPI Marketing') + '</h3>' +
+        '<div class="flex items-center gap-2">' + (kpiView !== 'settings' ? monthSelect : '') +
+          (isSuper && kpiView === 'list' ? '<button type="button" onclick="openKpiSettings()" class="text-xs font-semibold text-[var(--brand-dark)] border border-[var(--line)] rounded-lg px-3 py-2">Atur Target</button>' : '') +
+        '</div></div>';
+
+      if (kpiView === 'settings') { body.innerHTML = head + renderKpiSettingsHtml(items); return; }
+      if (kpiLoading || !kpiData) {
+        body.innerHTML = head + '<p class="text-sm text-[var(--muted)] py-8 text-center">' + (kpiError ? 'Gagal memuat KPI: ' + escapeHtml(kpiError) : 'Menghitung KPI...') + '</p>';
+        return;
+      }
+      if (kpiError) {
+        body.innerHTML = head + '<p class="text-sm text-[var(--red)] py-8 text-center">Gagal memuat KPI: ' + escapeHtml(kpiError) + '</p>';
+        return;
+      }
+      if (kpiView === 'detail') { body.innerHTML = head + renderKpiDetailHtml(items); return; }
+      body.innerHTML = head + renderKpiListHtml(items);
+    }
+
+    function renderKpiListHtml(items) {
+      const rows = kpiData.rows.map(function (r, i) { return { r: r, i: i, score: kpiScore(r.counts, items) }; })
+        .sort(function (a, b) { return b.score.total - a.score.total || a.r.name.localeCompare(b.r.name); });
+      if (!rows.length) return '<p class="text-sm text-[var(--muted)] py-8 text-center">Belum ada akun marketing aktif.</p>';
+      return '<p class="text-xs text-[var(--muted)] mb-3">' + kpiMonthLabel(kpiData.month) + ' &middot; diurutkan dari skor tertinggi. Tekan nama untuk melihat rincian.</p>' +
+        '<div class="space-y-2">' + rows.map(function (x, rank) {
+          const chips = x.score.parts.map(function (p) {
+            const done = p.ratio >= 1;
+            return '<span class="text-[0.6875rem] rounded-full px-2 py-0.5 ' + (done ? 'bg-[var(--brand-soft)] text-[var(--brand-dark)] font-semibold' : 'bg-[#f3f4f7] text-[var(--muted)]') + '">' +
+              escapeHtml(p.item.label) + ' ' + p.actual + '/' + p.item.target + '</span>';
+          }).join(' ');
+          return '<button type="button" onclick="openKpiDetail(' + x.i + ')" class="w-full text-left border border-[var(--line)] rounded-xl px-3.5 py-3 hover:bg-[#f6f4ef]">' +
+            '<div class="flex items-center justify-between gap-2 mb-1.5">' +
+              '<span class="font-semibold text-sm">' + (rank + 1) + '. ' + escapeHtml(x.r.name) + '</span>' +
+              '<span class="text-sm font-bold">' + kpiFmt(x.score.total) + '<span class="text-xs font-normal text-[var(--muted)]"> / 100</span></span>' +
+            '</div>' + kpiBarHtml(x.score.total / 100) +
+            '<div class="flex flex-wrap gap-1 mt-2">' + chips + '</div>' +
+          '</button>';
+        }).join('') + '</div>';
+    }
+
+    function renderKpiDetailHtml(items) {
+      const r = kpiData.rows[kpiDetailIndex];
+      if (!r) return '<p class="text-sm text-[var(--muted)] py-8 text-center">Data tidak ditemukan.</p>';
+      const isMk = kpiIsMarketing();
+      const isSuper = currentUser && currentUser.role === 'SuperAdmin';
+      const score = kpiScore(r.counts, items);
+      const back = isMk ? '' : '<button type="button" onclick="backToKpiList()" class="text-xs font-semibold text-[var(--brand-dark)] mb-3">&larr; Semua marketing</button>';
+
+      const indicators = score.parts.map(function (p, idx) {
+        return '<div class="border border-[var(--line)] rounded-xl px-3.5 py-3">' +
+          '<div class="flex items-start justify-between gap-2">' +
+            '<div><p class="font-semibold text-sm">' + (idx + 1) + '. ' + escapeHtml(p.item.label) + '</p>' +
+            '<p class="text-xs text-[var(--muted)] mt-0.5">' + escapeHtml(p.item.hint) + '</p></div>' +
+            '<div class="text-right whitespace-nowrap"><p class="text-sm font-bold">' + p.actual + ' / ' + p.item.target + ' <span class="text-xs font-normal text-[var(--muted)]">' + escapeHtml(p.item.unit) + '</span></p>' +
+            '<p class="text-xs text-[var(--muted)]">' + kpiFmt(p.pts) + ' dari ' + kpiFmt(p.item.weight) + ' poin</p></div>' +
+          '</div><div class="mt-2">' + kpiBarHtml(p.ratio) + '</div>' +
+        '</div>';
+      }).join('');
+
+      const canDelete = isMk || isSuper;
+      const reports = r.reports.length
+        ? r.reports.map(function (rep) {
+            const p = rep.dateKey.split('-');
+            const link = rep.link ? ' &middot; <a href="' + escapeHtml(rep.link) + '" target="_blank" rel="noopener" class="text-[var(--brand-dark)] underline">link</a>' : '';
+            return '<div class="flex items-start justify-between gap-2 border-t border-[var(--line)] py-2 first:border-t-0">' +
+              '<div class="text-sm"><b>' + p[2] + '/' + p[1] + '</b> &middot; ' + escapeHtml(rep.type || '-') + link +
+              (rep.note ? '<p class="text-xs text-[var(--muted)] mt-0.5">' + escapeHtml(rep.note) + '</p>' : '') + '</div>' +
+              (canDelete ? '<button type="button" onclick="deleteKpiReport(\'' + escapeHtml(rep.id) + '\')" class="text-xs font-semibold text-[var(--red)] whitespace-nowrap">Hapus</button>' : '') +
+            '</div>';
+          }).join('')
+        : '<p class="text-sm text-[var(--muted)] py-2">Belum ada laporan di bulan ini.</p>';
+
+      const today = kpiDateKey(new Date());
+      const form = isMk && kpiMonth === kpiCurrentMonth()
+        ? '<div class="bg-[var(--brand-soft)] rounded-xl px-3.5 py-3 mb-3">' +
+            '<p class="font-semibold text-sm mb-2">Lapor Live TikTok / Canvasing</p>' +
+            '<div class="grid grid-cols-2 gap-2 mb-2">' +
+              '<input type="date" id="kpiReportDate" class="field-input" value="' + today + '" min="' + kpiMonth + '-01" max="' + today + '" aria-label="Tanggal">' +
+              '<select id="kpiReportType" class="field-input" aria-label="Jenis">' +
+                KPI_REPORT_TYPES.map(function (t) { return '<option value="' + t.value + '">' + t.label + '</option>'; }).join('') +
+              '</select>' +
+            '</div>' +
+            '<input type="text" id="kpiReportNote" class="field-input mb-2" placeholder="Keterangan, contoh: Live 2 jam, 35 penonton / Canvasing Perum X">' +
+            '<input type="url" id="kpiReportLink" class="field-input mb-2" placeholder="Link bukti (opsional): video live, foto di Drive, dsb.">' +
+            '<p id="kpiReportError" class="hidden text-xs text-[var(--red)] mb-2"></p>' +
+            '<button type="button" id="kpiReportBtn" onclick="saveKpiReport()" class="btn-primary text-white font-semibold text-sm w-full py-2.5 rounded-lg"' + (kpiSaving ? ' disabled' : '') + '>Simpan Laporan</button>' +
+          '</div>'
+        : '';
+
+      return back +
+        '<div class="flex items-end justify-between gap-2 mb-2">' +
+          '<div><p class="font-bold">' + escapeHtml(r.name) + '</p><p class="text-xs text-[var(--muted)]">' + kpiMonthLabel(kpiData.month) + '</p></div>' +
+          '<p class="text-2xl font-bold">' + kpiFmt(score.total) + '<span class="text-sm font-normal text-[var(--muted)]"> / 100</span></p>' +
+        '</div>' + kpiBarHtml(score.total / 100) +
+        '<div class="space-y-2 mt-4">' + indicators + '</div>' +
+        '<h4 class="font-bold text-sm mt-5 mb-2">Laporan Online/Offline (' + r.reports.length + ' laporan, ' + r.counts.online + ' hari)</h4>' +
+        form + '<div>' + reports + '</div>';
+    }
+
+    function renderKpiSettingsHtml(items) {
+      const totalWeight = items.reduce(function (s, it) { return s + it.weight; }, 0);
+      return '<p class="text-xs text-[var(--muted)] mb-3">Target berlaku per bulan untuk setiap marketing. Total bobot harus 100%.</p>' +
+        '<div class="space-y-2">' + items.map(function (it) {
+          return '<div class="grid grid-cols-[1fr_5.5rem_4.5rem] gap-2 items-center">' +
+            '<span class="text-sm font-semibold">' + escapeHtml(it.label) + '</span>' +
+            '<input type="number" min="1" step="1" id="kpiTarget_' + it.key + '" value="' + it.target + '" class="field-input" aria-label="Target ' + escapeHtml(it.label) + '">' +
+            '<input type="number" min="0" max="100" step="1" id="kpiWeight_' + it.key + '" value="' + it.weight + '" oninput="updateKpiWeightTotal()" class="field-input" aria-label="Bobot ' + escapeHtml(it.label) + '">' +
+          '</div>';
+        }).join('') + '</div>' +
+        '<div class="grid grid-cols-[1fr_5.5rem_4.5rem] gap-2 text-xs text-[var(--muted)] mt-1"><span></span><span>Target</span><span>Bobot %</span></div>' +
+        '<p class="text-sm mt-3">Total bobot: <b id="kpiWeightTotal">' + kpiFmt(totalWeight) + '%</b></p>' +
+        '<p id="kpiSettingsError" class="hidden text-xs text-[var(--red)] mt-2"></p>' +
+        '<div class="flex gap-2 mt-4">' +
+          '<button type="button" onclick="cancelKpiSettings()" class="border border-[var(--line)] font-semibold text-sm px-4 py-2.5 rounded-lg flex-1">Batal</button>' +
+          '<button type="button" id="kpiSettingsSaveBtn" onclick="saveKpiSettings()" class="btn-primary text-white font-semibold text-sm px-4 py-2.5 rounded-lg flex-1">Simpan Target</button>' +
+        '</div>';
+    }
+
+    function openKpiDetail(i) { kpiDetailIndex = i; kpiView = 'detail'; renderKpi(); }
+    function backToKpiList() { kpiView = 'list'; renderKpi(); }
+    function openKpiSettings() { kpiView = 'settings'; renderKpi(); }
+    function cancelKpiSettings() { kpiView = 'list'; renderKpi(); }
+
+    function updateKpiWeightTotal() {
+      const total = KPI_DEFAULTS.reduce(function (s, d) {
+        return s + (Number(document.getElementById('kpiWeight_' + d.key).value) || 0);
+      }, 0);
+      const el = document.getElementById('kpiWeightTotal');
+      if (el) {
+        el.textContent = kpiFmt(total) + '%';
+        el.style.color = Math.abs(total - 100) < 0.001 ? '' : 'var(--red)';
+      }
+    }
+
+    function saveKpiSettings() {
+      if (!currentUser || currentUser.role !== 'SuperAdmin') return;
+      const errEl = document.getElementById('kpiSettingsError');
+      const out = {};
+      let total = 0;
+      for (let i = 0; i < KPI_DEFAULTS.length; i++) {
+        const d = KPI_DEFAULTS[i];
+        const t = Number(document.getElementById('kpiTarget_' + d.key).value);
+        const w = Number(document.getElementById('kpiWeight_' + d.key).value);
+        if (!(t > 0) || !Number.isFinite(w) || w < 0) {
+          errEl.textContent = 'Target ' + d.label + ' harus lebih dari 0 dan bobotnya tidak boleh kosong.';
+          errEl.classList.remove('hidden');
+          return;
+        }
+        out[d.key] = { target: t, weight: w };
+        total += w;
+      }
+      if (Math.abs(total - 100) > 0.001) {
+        errEl.textContent = 'Total bobot sekarang ' + kpiFmt(total) + '%. Sesuaikan supaya pas 100%.';
+        errEl.classList.remove('hidden');
+        return;
+      }
+      const btn = document.getElementById('kpiSettingsSaveBtn');
+      btn.disabled = true;
+      btn.textContent = 'Menyimpan...';
+      const payload = { items: out, updatedAt: FieldValue.serverTimestamp(), updatedBy: currentUser.name || '' };
+      db.collection('settings').doc('kpi').set(payload).then(function () {
+        kpiConfig = { items: out };
+        kpiView = 'list';
+        renderKpi();
+      }).catch(function (err) {
+        errEl.textContent = 'Gagal menyimpan: ' + err.message;
+        errEl.classList.remove('hidden');
+        btn.disabled = false;
+        btn.textContent = 'Simpan Target';
+      });
+    }
+
+    function saveKpiReport() {
+      if (!kpiIsMarketing() || kpiSaving) return;
+      const errEl = document.getElementById('kpiReportError');
+      const showErr = function (msg) { errEl.textContent = msg; errEl.classList.remove('hidden'); };
+      const dateKey = document.getElementById('kpiReportDate').value;
+      const type = document.getElementById('kpiReportType').value;
+      const note = document.getElementById('kpiReportNote').value.trim();
+      let link = document.getElementById('kpiReportLink').value.trim();
+      const today = kpiDateKey(new Date());
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(dateKey)) return showErr('Pilih tanggal kegiatan.');
+      if (dateKey > today) return showErr('Tanggal tidak boleh lebih dari hari ini.');
+      if (dateKey.slice(0, 7) !== kpiCurrentMonth()) return showErr('Laporan hanya bisa untuk tanggal di bulan ini.');
+      if (!note) return showErr('Keterangan wajib diisi supaya SPV tahu kegiatannya.');
+      if (link && !/^https?:\/\//i.test(link)) link = 'https://' + link;
+      kpiSaving = true;
+      const btn = document.getElementById('kpiReportBtn');
+      if (btn) { btn.disabled = true; btn.textContent = 'Menyimpan...'; }
+      kpiReportsRef(currentUser.uid).add({
+        dateKey: dateKey,
+        type: type,
+        note: note.slice(0, 300),
+        link: link.slice(0, 500),
+        name: currentUser.name || '',
+        createdAt: FieldValue.serverTimestamp()
+      }).then(function () {
+        kpiSaving = false;
+        loadKpiData();
+      }).catch(function (err) {
+        kpiSaving = false;
+        if (btn) { btn.disabled = false; btn.textContent = 'Simpan Laporan'; }
+        showErr('Gagal menyimpan laporan: ' + err.message);
+      });
+    }
+
+    function deleteKpiReport(id) {
+      const r = kpiData && kpiData.rows[kpiDetailIndex];
+      if (!r || !id) return;
+      if (!confirm('Hapus laporan ini?')) return;
+      kpiReportsRef(r.uid).doc(id).delete().then(function () {
+        loadKpiData();
+      }).catch(function (err) {
+        alert('Gagal menghapus laporan: ' + err.message);
+      });
     }
 
     // ------------------------------------------------------------
@@ -3922,6 +4404,9 @@
       if (testPushBtn) testPushBtn.classList.add('hidden');
       const broadcastBtn = document.getElementById('csBroadcastBtn');
       if (broadcastBtn) broadcastBtn.classList.add('hidden');
+      const kpiBtn = document.getElementById('csKpiBtn');
+      if (kpiBtn) kpiBtn.classList.add('hidden');
+      if (kpiModalOpen) closeKpiModal();
       if (role === 'CS') {
         document.getElementById('csHeaderTitle').textContent = APP.appName + ' - Panel CS';
         document.getElementById('csHeaderSubtitle').textContent = 'Panel CS';
@@ -3942,6 +4427,8 @@
         if (isSuper && testPushBtn) testPushBtn.classList.remove('hidden');
         // Kirim Notif (peringatan / pengumuman lewat push) untuk SPV/Manager & Super Admin.
         if (broadcastBtn) broadcastBtn.classList.remove('hidden');
+        // KPI Marketing (semua marketing) untuk SPV/Manager & Super Admin.
+        if (kpiBtn) kpiBtn.classList.remove('hidden');
         showView('cs');
         startLeadsListenerCsAdmin();
       } else if (role === 'Marketing') {
@@ -3973,6 +4460,7 @@
       usersData = [];
       applyMarketingRoster();
       if (manageModalOpen) closeManageModal();
+      if (kpiModalOpen) closeKpiModal();
     }
 
     // ------------------------------------------------------------
@@ -4050,7 +4538,7 @@
     // Mode kembali ke 'hemat' setiap login / muat ulang halaman.
     // ------------------------------------------------------------
     const LEADS_WINDOW_DAYS = 90;
-    const ACTIVE_LEAD_STATUSES = ['New', 'Awal Chat', 'Follow-Up 1', 'Follow-Up 2', 'Follow-Up 3', 'Site Visit', 'Lain-lain'];
+    const ACTIVE_LEAD_STATUSES = ['New', 'Awal Chat', 'Follow-Up 1', 'Follow-Up 2', 'Follow-Up 3', 'Site Visit', 'Closing ITJ', 'Lain-lain'];
     let leadsLoadMode = 'hemat';
     let allLeadsReady = false;        // true setelah data mode 'semua' selesai dimuat
     let leadsHematUnavailable = false; // true kalau query mode hemat gagal (mis. indeks Firestore belum dibuat)

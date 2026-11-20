@@ -93,6 +93,19 @@ service cloud.firestore {
       }
     }
 
+    // ---------- Laporan KPI Online/Offline (Live TikTok / Canvasing) ----------
+    // kpiReports/{uid}/kpiItems/{id}: ditulis marketing sendiri, dibaca SPV/Super Admin untuk KPI.
+    match /kpiReports/{uid}/kpiItems/{itemId} {
+      allow read: if isStaff() || (isSelf(uid) && isActive());
+      allow create: if isMarketing() && isSelf(uid)
+        && request.resource.data.type in ['Live TikTok', 'Canvasing']
+        && request.resource.data.dateKey is string
+        && request.resource.data.dateKey.size() == 10
+        && request.resource.data.note is string
+        && request.resource.data.note.size() <= 300;
+      allow delete: if isSuper() || (isMarketing() && isSelf(uid));
+    }
+
     // ---------- Log pengingat WA ----------
     match /reminderLogs/{logId} {
       allow read, create: if isStaff();

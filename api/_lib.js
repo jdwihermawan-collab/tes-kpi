@@ -5,7 +5,7 @@
 const admin = require('firebase-admin');
 
 const ACCEPT_WINDOW_MS = 5 * 60 * 1000;
-const CLOSED_STATUSES = ['Closed (Deal)', 'Lost (Batal)'];
+const CLOSED_STATUSES = ['Closing SPPR', 'Closed (Deal)', 'Lost (Batal)'];
 const INVALID_TOKEN_CODES = [
   'messaging/registration-token-not-registered',
   'messaging/invalid-registration-token',
