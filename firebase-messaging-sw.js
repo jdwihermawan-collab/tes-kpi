@@ -9,12 +9,12 @@ importScripts('https://www.gstatic.com/firebasejs/10.13.0/firebase-messaging-com
 
 // Isi dengan config Firebase project BARU (TES KPI), sama persis dengan APP_CONFIG.firebase di index.html.
 firebase.initializeApp({
-  apiKey: '',
-  authDomain: '',
-  projectId: '',
-  storageBucket: '',
-  messagingSenderId: '',
-  appId: ''
+  apiKey: 'AIzaSyClhownnwsQqmHxdcAtNF8Q0WmB6xYWVD8',
+  authDomain: 'tes-kpi-0f618c.firebaseapp.com',
+  projectId: 'tes-kpi-0f618c',
+  storageBucket: 'tes-kpi-0f618c.firebasestorage.app',
+  messagingSenderId: '693028465008',
+  appId: '1:693028465008:web:dad132ed1016dc98bcc7b5'
 });
 
 firebase.messaging();
