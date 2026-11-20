@@ -1329,8 +1329,8 @@
               <input type="text" id="closingUnitInput" class="modal-input" maxlength="60" placeholder="Contoh: C-12">
             </div>
             <div>
-              <label class="text-xs font-semibold text-[var(--muted)] mb-1 block" for="closingNominalInput">Nominal (opsional)</label>
-              <input type="text" id="closingNominalInput" class="modal-input" maxlength="40" inputmode="numeric" placeholder="Contoh: 5.000.000">
+              <label class="text-xs font-semibold text-[var(--muted)] mb-1 block" for="closingNominalInput">Nominal Rp (opsional)</label>
+              <input type="text" id="closingNominalInput" class="modal-input" maxlength="25" inputmode="numeric" oninput="formatNominalInput(this)" placeholder="Contoh: 5.000.000">
             </div>
           </div>
         </div>
@@ -3197,7 +3197,7 @@
           kpiVerifyBadge(cl.status) +
         '</div>' +
         '<p class="text-xs text-[var(--muted)] mt-0.5">' + escapeHtml(info.project || l.project || '-') + ' &middot; ' + formatDateID(cl.date) +
-          (info.unit ? ' &middot; Unit ' + escapeHtml(info.unit) : '') + (info.nominal ? ' &middot; ' + escapeHtml(info.nominal) : '') + '</p>' +
+          (info.unit ? ' &middot; Unit ' + escapeHtml(info.unit) : '') + (info.nominal ? ' &middot; ' + escapeHtml(formatRupiahText(info.nominal)) : '') + '</p>' +
         (v && v.by ? '<p class="text-[0.6875rem] text-[var(--muted)] mt-0.5">Diputuskan oleh ' + escapeHtml(v.by) + '</p>' : '') +
         buttons +
       '</div>';
@@ -3288,7 +3288,7 @@
             [Math.round(x.score.total * 100) / 100, (x.r.counts.itjPending || 0) + (x.r.counts.spprPending || 0)]));
         });
         const laporan = [['Nama Marketing', 'Tanggal', 'Jenis', 'Link TikTok', 'Lokasi', 'Izin dari', 'Lapor di grup', 'Jam lapor', 'Keterangan', 'Status', 'Alasan tidak valid']];
-        const closing = [['Nama Marketing', 'Buyer', 'Proyek', 'Tahap', 'Tanggal', 'Unit', 'Nominal', 'Verifikasi', 'Diputuskan oleh']];
+        const closing = [['Nama Marketing', 'Buyer', 'Proyek', 'Tahap', 'Tanggal', 'Unit', 'Nominal (Rp)', 'Verifikasi', 'Diputuskan oleh']];
         kpiData.rows.forEach(function (r) {
           r.reports.forEach(function (rep) {
             laporan.push([r.name, rep.dateKey, rep.type || '', rep.link || '', rep.place || '', rep.permitFrom || '', rep.reportGroup || '', rep.reportTime || '', rep.note || '',
@@ -3297,14 +3297,19 @@
           r.closings.forEach(function (cl) {
             const info = kpiClosingInfo(cl.lead, cl.key);
             const v = cl.lead.kpiVerify && cl.lead.kpiVerify[cl.key];
-            closing.push([r.name, cl.lead.buyerName || '', info.project || cl.lead.project || '', kpiStageLabel(cl.key), formatDateID(cl.date), info.unit || '', info.nominal || '',
+            closing.push([r.name, cl.lead.buyerName || '', info.project || cl.lead.project || '', kpiStageLabel(cl.key), formatDateID(cl.date), info.unit || '', formatRupiahDigits(info.nominal) ? Number(String(info.nominal).replace(/\D/g, '')) : '',
               cl.status === 'approved' ? 'Disetujui' : cl.status === 'rejected' ? 'Ditolak' : 'Menunggu', (v && v.by) || '']);
           });
         });
         const wb = XLSX.utils.book_new();
         XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(rekap), 'Rekap KPI');
         XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(laporan), 'Laporan Online-Offline');
-        XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(closing), 'Closing ITJ-SPPR');
+        const closingSheet = XLSX.utils.aoa_to_sheet(closing);
+        for (let i = 1; i < closing.length; i++) {   // kolom Nominal (G): tampil dengan pemisah ribuan
+          const cell = closingSheet[XLSX.utils.encode_cell({ r: i, c: 6 })];
+          if (cell && cell.t === 'n') cell.z = '#,##0';
+        }
+        XLSX.utils.book_append_sheet(wb, closingSheet, 'Closing ITJ-SPPR');
         XLSX.writeFile(wb, 'KPI-Marketing-' + kpiData.month + '.xlsx');
       }).catch(function (err) {
         alert(err.message || String(err));
@@ -6923,6 +6928,31 @@
       if (leadId) openModal(leadId);
     }
 
+    // Nominal uang: hanya angka, dengan titik pemisah ribuan (5000000 -> "5.000.000").
+    function formatRupiahDigits(value) {
+      const digits = String(value == null ? '' : value).replace(/\D/g, '').replace(/^0+(?=\d)/, '');
+      return digits ? digits.replace(/\B(?=(\d{3})+(?!\d))/g, '.') : '';
+    }
+
+    function formatRupiahText(value) {
+      const f = formatRupiahDigits(value);
+      return f ? 'Rp ' + f : '';
+    }
+
+    // Dipanggil saat mengetik di kolom nominal: titik ribuan muncul otomatis, posisi kursor dijaga.
+    function formatNominalInput(el) {
+      const caret = el.selectionStart || 0;
+      const digitsBefore = el.value.slice(0, caret).replace(/\D/g, '').length;
+      const formatted = formatRupiahDigits(el.value);
+      el.value = formatted;
+      let pos = 0, seen = 0;
+      while (pos < formatted.length && seen < digitsBefore) {
+        if (/\d/.test(formatted[pos])) seen++;
+        pos++;
+      }
+      try { el.setSelectionRange(pos, pos); } catch (e) {}
+    }
+
     // Kotak "Data Closing" hanya tampil untuk status Closing ITJ / Closing SPPR.
     function closingKeyForStatus(status) {
       return status === 'Closing ITJ' ? 'itj' : status === 'Closing SPPR' ? 'sppr' : '';
@@ -6944,7 +6974,7 @@
       }
       projSel.value = proj;
       document.getElementById('closingUnitInput').value = info && info.unit ? info.unit : '';
-      document.getElementById('closingNominalInput').value = info && info.nominal ? info.nominal : '';
+      document.getElementById('closingNominalInput').value = info && info.nominal ? formatRupiahDigits(info.nominal) : '';
     }
 
     function onStatusSelectChange() {
@@ -6994,7 +7024,7 @@
       const closingKey = closingKeyForStatus(newStatus);
       const closingProject = document.getElementById('closingProjectInput').value;
       const closingUnit = document.getElementById('closingUnitInput').value.trim();
-      const closingNominal = document.getElementById('closingNominalInput').value.trim();
+      const closingNominal = formatRupiahDigits(document.getElementById('closingNominalInput').value);
       if (closingKey && !closingProject) {
         alert('Pilih proyek yang closing.');
         document.getElementById('closingProjectInput').focus();
