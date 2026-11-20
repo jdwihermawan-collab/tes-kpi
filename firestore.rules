@@ -55,7 +55,9 @@ service cloud.firestore {
       allow update: if isMarketing()
         && resource.data.assignedTo == myName()
         && request.resource.data.assignedTo == myName()
-        && request.resource.data.get('isSelfInput', false) == resource.data.get('isSelfInput', false);
+        && request.resource.data.get('isSelfInput', false) == resource.data.get('isSelfInput', false)
+        // Verifikasi closing untuk KPI hanya boleh diubah SPV/Manager & Super Admin.
+        && request.resource.data.get('kpiVerify', null) == resource.data.get('kpiVerify', null);
       // Marketing hanya boleh menghapus lead Input Mandiri miliknya sendiri.
       // Lead dari CS / iklan tidak bisa dihapus marketing (ubah status ke "Lost (Batal)").
       allow delete: if isMarketing()
@@ -96,14 +98,25 @@ service cloud.firestore {
     // ---------- Laporan KPI Online/Offline (Live TikTok / Canvasing) ----------
     // kpiReports/{uid}/kpiItems/{id}: ditulis marketing sendiri, dibaca SPV/Super Admin untuk KPI.
     match /kpiReports/{uid}/kpiItems/{itemId} {
+      function isVerifier() { return isActive() && me().role in ['Admin', 'SuperAdmin']; }
+      function str(f, max) { return request.resource.data.get(f, '') is string && request.resource.data.get(f, '').size() <= max; }
+      function filled(f) { return request.resource.data.get(f, '') is string && request.resource.data.get(f, '').size() > 0; }
       allow read: if isStaff() || (isSelf(uid) && isActive());
+      // Live TikTok wajib link; Canvasing wajib lokasi, izin dari siapa, grup & jam lapor.
       allow create: if isMarketing() && isSelf(uid)
-        && request.resource.data.type in ['Live TikTok', 'Canvasing']
         && request.resource.data.dateKey is string
         && request.resource.data.dateKey.size() == 10
-        && request.resource.data.note is string
-        && request.resource.data.note.size() <= 300;
-      allow delete: if isSuper() || (isMarketing() && isSelf(uid));
+        && str('note', 300)
+        && request.resource.data.get('invalid', false) == false
+        && ((request.resource.data.type == 'Live TikTok' && filled('link') && str('link', 500))
+          || (request.resource.data.type == 'Canvasing' && filled('place') && filled('permitFrom')
+              && filled('reportGroup') && filled('reportTime')
+              && str('place', 150) && str('permitFrom', 150) && str('reportGroup', 100)));
+      // SPV/Manager & Super Admin hanya boleh menandai valid / tidak valid.
+      allow update: if isVerifier()
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['invalid', 'invalidReason', 'invalidBy', 'invalidAt']);
+      // Marketing boleh menghapus laporannya sendiri selama belum ditandai tidak valid.
+      allow delete: if isSuper() || (isMarketing() && isSelf(uid) && resource.data.get('invalid', false) == false);
     }
 
     // ---------- Log pengingat WA ----------
