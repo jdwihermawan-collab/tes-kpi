@@ -1321,6 +1321,8 @@
         <div id="closingInfoBox" class="hidden border border-[var(--line)] rounded-xl p-3 mb-4" style="background:#fdf5ea;">
           <p class="field-label mb-0.5">Data Closing</p>
           <p class="text-xs text-[var(--muted)] mb-2">Dipakai SPV/Manager untuk memverifikasi closing sebelum dihitung di KPI.</p>
+          <label class="text-xs font-semibold text-[var(--muted)] mb-1 block" for="closingProjectInput">Proyek</label>
+          <select id="closingProjectInput" class="modal-input mb-2"></select>
           <div class="grid grid-cols-2 gap-2">
             <div>
               <label class="text-xs font-semibold text-[var(--muted)] mb-1 block" for="closingUnitInput">Unit / Blok</label>
@@ -2274,6 +2276,7 @@
       fillSelectOptions('project', projectList, 'Pilih proyek', true);
       fillSelectOptions('selfProject', projectList, 'Pilih proyek', true);
       fillSelectOptions('spamProject', projectList, 'Pilih proyek', true);
+      fillSelectOptions('closingProjectInput', projectList, 'Pilih proyek', true);
       fillSelectOptions('csFilterProject', projectList, 'Semua Proyek', false);
       fillSelectOptions('marketingFilterProject', projectList, 'Semua Proyek', false);
       refreshManageModalIfIdle('projects');
@@ -3193,7 +3196,7 @@
             (showMarketing ? '<span class="text-[var(--muted)]"> &middot; ' + escapeHtml(marketingName) + '</span>' : '') + '</div>' +
           kpiVerifyBadge(cl.status) +
         '</div>' +
-        '<p class="text-xs text-[var(--muted)] mt-0.5">' + escapeHtml(l.project || '-') + ' &middot; ' + formatDateID(cl.date) +
+        '<p class="text-xs text-[var(--muted)] mt-0.5">' + escapeHtml(info.project || l.project || '-') + ' &middot; ' + formatDateID(cl.date) +
           (info.unit ? ' &middot; Unit ' + escapeHtml(info.unit) : '') + (info.nominal ? ' &middot; ' + escapeHtml(info.nominal) : '') + '</p>' +
         (v && v.by ? '<p class="text-[0.6875rem] text-[var(--muted)] mt-0.5">Diputuskan oleh ' + escapeHtml(v.by) + '</p>' : '') +
         buttons +
@@ -3294,7 +3297,7 @@
           r.closings.forEach(function (cl) {
             const info = kpiClosingInfo(cl.lead, cl.key);
             const v = cl.lead.kpiVerify && cl.lead.kpiVerify[cl.key];
-            closing.push([r.name, cl.lead.buyerName || '', cl.lead.project || '', kpiStageLabel(cl.key), formatDateID(cl.date), info.unit || '', info.nominal || '',
+            closing.push([r.name, cl.lead.buyerName || '', info.project || cl.lead.project || '', kpiStageLabel(cl.key), formatDateID(cl.date), info.unit || '', info.nominal || '',
               cl.status === 'approved' ? 'Disetujui' : cl.status === 'rejected' ? 'Ditolak' : 'Menunggu', (v && v.by) || '']);
           });
         });
@@ -6929,6 +6932,17 @@
       const key = closingKeyForStatus(document.getElementById('statusSelect').value);
       document.getElementById('closingInfoBox').classList.toggle('hidden', !key);
       const info = key && lead && lead.closingInfo ? (lead.closingInfo[key] || (key === 'sppr' ? lead.closingInfo.itj : null)) : null;
+      // Proyek closing: default proyek lead (boleh diganti kalau buyer akhirnya ambil di proyek lain).
+      const projSel = document.getElementById('closingProjectInput');
+      fillSelectOptions('closingProjectInput', projectList, 'Pilih proyek', true);
+      const proj = (info && info.project) || (lead && lead.project) || '';
+      if (proj && projectList.indexOf(proj) === -1) {
+        const opt = document.createElement('option');
+        opt.value = proj;
+        opt.textContent = proj;
+        projSel.appendChild(opt);
+      }
+      projSel.value = proj;
       document.getElementById('closingUnitInput').value = info && info.unit ? info.unit : '';
       document.getElementById('closingNominalInput').value = info && info.nominal ? info.nominal : '';
     }
@@ -6978,14 +6992,21 @@
       }
       // Closing ITJ / SPPR: unit wajib (nominal opsional) supaya SPV bisa memverifikasi untuk KPI.
       const closingKey = closingKeyForStatus(newStatus);
+      const closingProject = document.getElementById('closingProjectInput').value;
       const closingUnit = document.getElementById('closingUnitInput').value.trim();
       const closingNominal = document.getElementById('closingNominalInput').value.trim();
+      if (closingKey && !closingProject) {
+        alert('Pilih proyek yang closing.');
+        document.getElementById('closingProjectInput').focus();
+        return;
+      }
       if (closingKey && !closingUnit) {
         alert('Isi Unit / Blok yang closing supaya SPV/Manager bisa memverifikasi.');
         document.getElementById('closingUnitInput').focus();
         return;
       }
       if (closingKey) {
+        historyEntry.closingProject = closingProject;
         historyEntry.unit = closingUnit;
         if (closingNominal) historyEntry.nominal = closingNominal;
       }
@@ -6997,7 +7018,7 @@
         notes: FieldValue.arrayUnion(historyEntry)
       };
       if (closingKey) {
-        updatePayload['closingInfo.' + closingKey] = { unit: closingUnit, nominal: closingNominal, at: new Date() };
+        updatePayload['closingInfo.' + closingKey] = { project: closingProject, unit: closingUnit, nominal: closingNominal, at: new Date() };
       }
       if (visitChanged && visitDate) {
         updatePayload.visitDate = visitDate;
