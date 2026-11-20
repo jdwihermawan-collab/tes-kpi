@@ -18,10 +18,10 @@
   window.APP_CONFIG = {
     // ---------- IDENTITAS ----------
     companyName: 'PT. Podo Rukun Nusantara',   // dipakai di kop & footer laporan PDF
-    appName: 'Podorukun Nusantara Lead Tracker', // judul aplikasi (tab browser, header, login)
+    appName: 'TES KPI - Lead Tracker', // judul aplikasi (tab browser, header, login)
     groupName: 'Podorukun Nusantara',         // sebutan di pesan WA: "... hari ini di <groupName>"
     emailDomain: 'crm.prn',                   // akun login pakai ID: ID "angga" = angga@crm.prn (alamat buatan, bukan email asli)
-    crmUrl: 'https://crm-prn.vercel.app',                             // link aplikasi ini (dikirim di pesan WA ke marketing); kosongkan bila belum ada
+    crmUrl: '',                             // link aplikasi ini (dikirim di pesan WA ke marketing); kosongkan bila belum ada
 
     // ---------- WARNA ----------
     // brand      : warna utama (tombol, fokus, aksen)
@@ -57,15 +57,17 @@
     // ---------- FIREBASE ----------
     // Salin dari Firebase Console > Project settings > Your apps > SDK setup (Config).
     firebase: {
-      apiKey: 'AIzaSyCtATrTFtvUEqe2G5mOplp4LMIzZKkIdNM',
-      authDomain: 'crm-prn-d93a4.firebaseapp.com',
-      projectId: 'crm-prn-d93a4',
-      storageBucket: 'crm-prn-d93a4.firebasestorage.app',
-      messagingSenderId: '249285239078',
-      appId: '1:249285239078:web:e223d46bc2417ca1bce1e7',
+      // SENGAJA DIKOSONGKAN: isi dengan config Firebase project BARU khusus TES KPI.
+      // Jangan pakai config crm-prn-d93a4 supaya data tidak tercampur dengan CRM PRN.
+      apiKey: '',
+      authDomain: '',
+      projectId: '',
+      storageBucket: '',
+      messagingSenderId: '',
+      appId: '',
       // Push notification: Firebase Console > Project settings > Cloud Messaging >
       // Web Push certificates > "Generate key pair", lalu salin "Key pair" ke sini (boleh publik).
-      vapidKey: 'BEZK-YcCAOAiomknqxsV5bA8O3yI3rfRZCDJQaZCB6zNvX8BEZVOFAqHJxZ-tflPqOZPhtVkbI1oB0MfB3h5ZPk'
+      vapidKey: ''
     }
   };
 

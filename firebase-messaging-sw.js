@@ -7,13 +7,14 @@
 importScripts('https://www.gstatic.com/firebasejs/10.13.0/firebase-app-compat.js');
 importScripts('https://www.gstatic.com/firebasejs/10.13.0/firebase-messaging-compat.js');
 
+// Isi dengan config Firebase project BARU (TES KPI), sama persis dengan APP_CONFIG.firebase di index.html.
 firebase.initializeApp({
-  apiKey: 'AIzaSyCtATrTFtvUEqe2G5mOplp4LMIzZKkIdNM',
-  authDomain: 'crm-prn-d93a4.firebaseapp.com',
-  projectId: 'crm-prn-d93a4',
-  storageBucket: 'crm-prn-d93a4.firebasestorage.app',
-  messagingSenderId: '249285239078',
-  appId: '1:249285239078:web:e223d46bc2417ca1bce1e7'
+  apiKey: '',
+  authDomain: '',
+  projectId: '',
+  storageBucket: '',
+  messagingSenderId: '',
+  appId: ''
 });
 
 firebase.messaging();
