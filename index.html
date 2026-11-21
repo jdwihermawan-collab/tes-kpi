@@ -3517,7 +3517,7 @@
       db.collection('settings').doc('kpi').get()
         .then(function (s) { kpiConfig = s.exists ? s.data() : null; renderKpiGauge(); })
         .catch(function (err) { console.error('Gagal memuat pengaturan KPI:', err); });
-      db.collection('leads').where('assignedTo', '==', currentUser.name).get()
+      kpiOwnLeadsSince(kpiMonthRange(month).start)
         .then(function (snap) {
           if (seq !== kpiHome.seq) return;
           const map = {};
@@ -3662,6 +3662,17 @@
       );
     }
 
+    // Lead milik marketing yang berubah sejak tanggal tertentu (cukup untuk menghitung KPI bulan itu).
+    // Butuh index gabungan leads: assignedTo + lastUpdated. Kalau index belum ada, otomatis
+    // memakai query lama (semua lead milik marketing) supaya KPI tetap tampil.
+    function kpiOwnLeadsSince(since) {
+      const base = db.collection('leads').where('assignedTo', '==', currentUser.name);
+      return base.where('lastUpdated', '>=', since).get().catch(function (err) {
+        console.warn('Index KPI (assignedTo + lastUpdated) belum tersedia, memakai query lengkap:', err && err.message);
+        return base.get();
+      });
+    }
+
     function kpiReportsRef(uid) {
       return db.collection('kpiReports').doc(uid).collection('kpiItems');
     }
@@ -3738,7 +3749,7 @@
       // Marketing: semua lead miliknya. SPV/Super Admin: lead yang berubah sejak awal bulan terpilih
       // (lead yang punya kejadian di bulan itu pasti lastUpdated-nya >= awal bulan).
       const leadsP = isMk
-        ? db.collection('leads').where('assignedTo', '==', currentUser.name).get()
+        ? kpiOwnLeadsSince(range.start)
         : db.collection('leads').where('lastUpdated', '>=', range.start).get();
       const reportsP = Promise.all(people.map(function (p) {
         return kpiReportsRef(p.uid).where('dateKey', '>=', range.firstKey).where('dateKey', '<=', range.lastKey).get()
@@ -7336,6 +7347,11 @@
         document.getElementById('closingUnitInput').focus();
         return;
       }
+      // Data closing hanya dicatat ulang (dan SPV diberi tahu) kalau baru atau berubah. Update status
+      // biasa pada lead yang sudah Closing tidak memicu permintaan verifikasi lagi.
+      const prevClosing = closingKey ? ((leadBefore.closingInfo || {})[closingKey] || null) : null;
+      const closingChanged = !!closingKey && (!prevClosing || prevClosing.project !== closingProject ||
+        prevClosing.unit !== closingUnit || formatRupiahDigits(prevClosing.nominal) !== closingNominal);
       if (closingKey) {
         historyEntry.closingProject = closingProject;
         historyEntry.unit = closingUnit;
@@ -7348,7 +7364,7 @@
         lastUpdated: FieldValue.serverTimestamp(),
         notes: FieldValue.arrayUnion(historyEntry)
       };
-      if (closingKey) {
+      if (closingChanged) {
         updatePayload['closingInfo.' + closingKey] = { project: closingProject, unit: closingUnit, nominal: closingNominal, at: new Date() };
       }
       if (visitChanged && visitDate) {
@@ -7379,7 +7395,7 @@
           logMarketingActivity('Update status ke ' + newStatus, updatedLead ? updatedLead.buyerName : '', updatedLeadId,
             oldStatus + ' \u2192 ' + newStatus + ' \u00b7 Catatan: ' + (updateNote.length > 120 ? updateNote.slice(0, 120) + '...' : updateNote));
           // KPI: closing baru -> SPV/Manager diminta memverifikasi (push).
-          if (closingKey && currentUser && currentUser.role === 'Marketing') {
+          if (closingChanged && currentUser && currentUser.role === 'Marketing') {
             callNotify('closing-submitted', updatedLeadId, { stage: closingKey });
           }
           if (visitChanged) {
@@ -7719,6 +7735,7 @@
       { key: 'spam', label: 'Nomor spam', hint: 'Input Spam dari CS (tampil di Riwayat).' },
       { key: 'reminderLogs', label: 'Log pengingat WA', hint: 'Catatan siapa yang mengingatkan marketing lewat WA.' },
       { key: 'activity', label: 'Aktivitas marketing', hint: 'Catatan login dan update data tiap marketing.' },
+      { key: 'kpi', label: 'Laporan KPI (Live / Canvasing)', hint: 'Laporan Online/Offline semua marketing. Target & bobot KPI tidak ikut terhapus.' },
       { key: 'broadcasts', label: 'Riwayat Kirim Notif', hint: 'Daftar notif/pengumuman yang pernah dikirim, termasuk riwayat di tombol lonceng.' },
       { key: 'rotation', label: 'Antrean giliran rotasi', noCount: true, hint: 'Giliran lead dimulai lagi dari marketing urutan pertama.' }
     ];

@@ -116,11 +116,15 @@ module.exports = async function handler(req, res) {
     if (!info) return res.json({ skipped: 'tidak ada data closing' });
     if (!(await L.claimPushKey(ref, 'closing-' + stage + '-' + L.toMillis(info.at)))) return res.json({ skipped: 'sudah dikirim' });
     const label = stage === 'itj' ? 'Closing ITJ' : 'Closing SPPR';
+    // Closing yang sudah diputuskan lalu datanya diubah marketing: SPV tetap diberi tahu.
+    const decided = ((lead.kpiVerify || {})[stage] || {}).status;
     const nominal = String(info.nominal || '').replace(/\D/g, '').replace(/\B(?=(\d{3})+(?!\d))/g, '.');
     const adminUids = users.filter(function (u) { return u.role === 'Admin'; }).map(function (u) { return u.uid; });
     const r = await L.sendToUids(adminUids, {
       kind: 'kpi-closing', leadId: leadId, link: link, tag: 'closing-' + leadId, sticky: true,
-      title: label + ' dari ' + caller.profile.name + ' perlu diverifikasi',
+      title: decided === 'approved' || decided === 'rejected'
+        ? 'Data ' + label + ' diubah ' + caller.profile.name + ' (sudah ' + (decided === 'approved' ? 'disetujui' : 'ditolak') + ')'
+        : label + ' dari ' + caller.profile.name + ' perlu diverifikasi',
       body: (lead.buyerName || '-') + ' \u00b7 ' + (info.project || lead.project || '-') + ' unit ' + (info.unit || '-') +
         (nominal ? ' \u00b7 Rp ' + nominal : '') + '. Buka menu KPI untuk menyetujui.'
     });

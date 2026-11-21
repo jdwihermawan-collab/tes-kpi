@@ -26,3 +26,9 @@ Super Admin bisa mengubah target & bobot lewat tombol **Atur Target** (tersimpan
 Skor per indikator = min(capaian / target, 1) x bobot (total maksimal 100).
 Status lead baru: `Closing ITJ` dan `Closing SPPR` (menggantikan `Closed (Deal)`).
 Laporan Online/Offline disimpan di `kpiReports/{uid}/kpiItems` (lihat `firestore.rules`).
+
+## Index Firestore
+Daftar index gabungan ada di `firestore.indexes.json` (sudah dibuat di project `tes-kpi-0f618c`):
+- `leads`: assignedTo + lastUpdated — KPI marketing hanya membaca lead yang berubah bulan itu (hemat read)
+- `leads`: assignedTo + createdAt — mode hemat daftar lead marketing
+Tanpa index, aplikasi tetap jalan (otomatis memakai query lengkap), hanya lebih boros read.
