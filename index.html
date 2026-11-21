@@ -3214,7 +3214,7 @@
       // Menyetujui SPPR berarti ITJ-nya juga sah (kalau ITJ belum diputuskan).
       if (key === 'sppr' && status === 'approved' && kpiVerifyStatus(lead, 'itj') === 'pending') upd['kpiVerify.itj'] = mark;
       db.collection('leads').doc(leadId).update(upd)
-        .then(function () { loadKpiData(); })
+        .then(function () { loadKpiData(true); })
         .catch(function (err) { alert('Gagal menyimpan verifikasi: ' + err.message); });
     }
 
@@ -3230,7 +3230,7 @@
         payload = { invalid: false, invalidReason: '', invalidBy: currentUser.name || '', invalidAt: FieldValue.serverTimestamp() };
       }
       kpiReportsRef(r.uid).doc(id).update(payload)
-        .then(function () { loadKpiData(); })
+        .then(function () { loadKpiData(true); })
         .catch(function (err) { alert('Gagal menyimpan: ' + err.message); });
     }
 
@@ -3270,7 +3270,28 @@
     }
 
     let kpiExportMenuOpen = false;
-    function toggleKpiExportMenu() { kpiExportMenuOpen = !kpiExportMenuOpen; renderKpi(); }
+    let kpiPdfOptionsOpen = false;
+    function toggleKpiExportMenu() { kpiExportMenuOpen = !kpiExportMenuOpen; kpiPdfOptionsOpen = false; renderKpi(); }
+    function toggleKpiPdfOptions() { kpiPdfOptionsOpen = !kpiPdfOptionsOpen; renderKpi(); }
+
+    function renderKpiPdfOptionsHtml() {
+      const box = function (id, label, sub) {
+        return '<label class="flex items-start gap-2.5 py-1.5 cursor-pointer"><input type="checkbox" id="' + id + '" checked class="mt-0.5 w-4 h-4">' +
+          '<span><span class="block text-sm font-semibold">' + label + '</span><span class="block text-xs text-[var(--muted)]">' + sub + '</span></span></label>';
+      };
+      return '<div class="border border-[var(--line)] rounded-xl px-3.5 py-3 mb-3">' +
+        '<p class="font-bold text-sm mb-1">Pilih isi PDF</p>' +
+        box('kpiPdfRekap', 'Rekap KPI', 'Skor dan capaian 7 indikator per marketing') +
+        box('kpiPdfClosing', 'Closing ITJ / SPPR', 'Proyek, unit, nominal, dan status verifikasi') +
+        box('kpiPdfLaporan', 'Laporan Online / Offline', 'Link Live TikTok dan detail canvasing') +
+        '<label class="block text-xs font-semibold text-[var(--muted)] mt-2 mb-1" for="kpiPdfWho">Marketing</label>' +
+        '<select id="kpiPdfWho" class="field-input"><option value="">Semua marketing</option>' +
+          kpiData.rows.map(function (r) { return '<option value="' + escapeHtml(r.name) + '">' + escapeHtml(r.name) + '</option>'; }).join('') +
+        '</select>' +
+        '<p class="text-[0.6875rem] text-[var(--muted)] mt-2">Export memakai data yang sudah dimuat di layar ini, jadi tidak menambah pembacaan database.</p>' +
+        '<button type="button" onclick="exportKpiPdf()" class="btn-primary text-white text-sm font-semibold w-full py-2.5 rounded-lg mt-2">Unduh PDF</button>' +
+      '</div>';
+    }
 
     // Export PDF KPI: kop sama dengan laporan lead (APP_CONFIG.companyName), isi rekap skor,
     // closing ITJ/SPPR, dan laporan Online/Offline bulan terpilih.
@@ -3280,12 +3301,22 @@
         alert('Pustaka PDF belum termuat, pastikan koneksi internet aktif lalu coba lagi.');
         return;
       }
+      // Pilihan isi PDF (panel "Pilih isi PDF"). Semua dari data yang sudah dimuat: tanpa read tambahan.
+      const checked = function (id) { const el = document.getElementById(id); return !el || el.checked; };
+      const opt = { rekap: checked('kpiPdfRekap'), closing: checked('kpiPdfClosing'), laporan: checked('kpiPdfLaporan') };
+      const whoEl = document.getElementById('kpiPdfWho');
+      const who = whoEl ? whoEl.value : '';
+      if (!opt.rekap && !opt.closing && !opt.laporan) {
+        alert('Pilih minimal satu bagian yang mau diekspor.');
+        return;
+      }
       const items = kpiItems();
       const doc = new window.jspdf.jsPDF({ orientation: 'landscape', unit: 'pt', format: 'a4' });
       const pageWidth = doc.internal.pageSize.getWidth();
       const pageHeight = doc.internal.pageSize.getHeight();
       const marginX = 36;
-      const rows = kpiData.rows.map(function (r) { return { r: r, score: kpiScore(r.counts, items) }; })
+      const srcRows = kpiData.rows.filter(function (r) { return !who || r.name === who; });
+      const rows = srcRows.map(function (r) { return { r: r, score: kpiScore(r.counts, items) }; })
         .sort(function (a, b) { return b.score.total - a.score.total || a.r.name.localeCompare(b.r.name); });
 
       doc.setFillColor.apply(doc, PDF_BRAND_GREEN);
@@ -3296,13 +3327,13 @@
       doc.text(String(APP.companyName || '').toUpperCase(), marginX, 34);
       doc.setFont('helvetica', 'normal');
       doc.setFontSize(11);
-      doc.text('Laporan KPI Marketing \u2013 ' + kpiMonthLabel(kpiData.month), marginX, 52);
+      doc.text('Laporan KPI Marketing – ' + kpiMonthLabel(kpiData.month) + (who ? ' – ' + who : ''), marginX, 52);
       doc.setFontSize(9);
       doc.setTextColor.apply(doc, PDF_BRAND_ON_DARK);
       doc.text('Skor per indikator = capaian / target x bobot (maks. 100). Closing dihitung setelah disetujui supervisor.', marginX, 68);
       doc.setTextColor(255, 255, 255);
       doc.text('Dicetak: ' + formatDateID(new Date()), pageWidth - marginX, 34, { align: 'right' });
-      doc.text('Jumlah marketing: ' + rows.length, pageWidth - marginX, 50, { align: 'right' });
+      doc.text(who ? 'Marketing: ' + who : 'Jumlah marketing: ' + rows.length, pageWidth - marginX, 50, { align: 'right' });
 
       const tableStyle = {
         margin: { left: marginX, right: marginX, bottom: 40 },
@@ -3310,80 +3341,80 @@
         headStyles: { fillColor: PDF_BRAND_GREEN, textColor: [255, 255, 255], fontStyle: 'bold', fontSize: 8.5, halign: 'center' },
         alternateRowStyles: { fillColor: PDF_BRAND_GREEN_SOFT }
       };
-      const sectionTitle = function (text, y) {
+      let first = true;
+      const section = function (title, tableOpts) {
+        let y = 110;
+        if (!first) {
+          y = doc.lastAutoTable.finalY + 28;
+          if (y > pageHeight - 110) { doc.addPage(); y = 50; }
+        }
+        first = false;
         doc.setFont('helvetica', 'bold');
         doc.setFontSize(12);
         doc.setTextColor.apply(doc, PDF_TEXT_DARK);
-        doc.text(text, marginX, y);
-      };
-      const nextY = function (gap) {
-        let y = doc.lastAutoTable.finalY + gap;
-        if (y > pageHeight - 110) { doc.addPage(); y = 50; }
-        return y;
+        doc.text(title, marginX, y);
+        doc.autoTable(Object.assign({}, tableStyle, tableOpts, { startY: y + 8 }));
       };
 
-      // 1. Rekap skor
-      sectionTitle('Rekap KPI', 110);
-      doc.autoTable(Object.assign({}, tableStyle, {
-        startY: 118,
-        head: [['No', 'Nama Marketing'].concat(items.map(function (it) { return it.label + '\n(target ' + it.target + ', ' + it.weight + '%)'; }), ['Total Skor'])],
-        body: rows.map(function (x, i) {
-          return [i + 1, x.r.name].concat(x.score.parts.map(function (p) { return p.actual + ' / ' + p.item.target; }), [kpiFmt(x.score.total)]);
-        }),
-        columnStyles: Object.assign({ 0: { halign: 'center', cellWidth: 26 }, 1: { fontStyle: 'bold' } },
-          (function () { const o = {}; for (let c = 2; c <= items.length + 2; c++) o[c] = { halign: 'center' }; o[items.length + 2] = { halign: 'center', fontStyle: 'bold' }; return o; })())
-      }));
-
-      // 2. Closing ITJ / SPPR
-      const closing = [];
-      kpiData.rows.forEach(function (r) {
-        r.closings.forEach(function (cl) {
-          const info = kpiClosingInfo(cl.lead, cl.key);
-          const v = cl.lead.kpiVerify && cl.lead.kpiVerify[cl.key];
-          closing.push([r.name, cl.lead.buyerName || '-', info.project || cl.lead.project || '-', kpiStageLabel(cl.key), formatDateID(cl.date),
-            info.unit || '-', formatRupiahText(info.nominal) || '-',
-            cl.status === 'approved' ? 'Disetujui' : cl.status === 'rejected' ? 'Ditolak' : 'Menunggu', (v && v.by) || '-']);
+      if (opt.rekap) {
+        const colStyles = { 0: { halign: 'center', cellWidth: 26 }, 1: { fontStyle: 'bold' } };
+        for (let c = 2; c <= items.length + 2; c++) colStyles[c] = { halign: 'center' };
+        colStyles[items.length + 2] = { halign: 'center', fontStyle: 'bold' };
+        section('Rekap KPI', {
+          head: [['No', 'Nama Marketing'].concat(items.map(function (it) { return it.label + '\n(target ' + it.target + ', ' + it.weight + '%)'; }), ['Total Skor'])],
+          body: rows.map(function (x, i) {
+            return [i + 1, x.r.name].concat(x.score.parts.map(function (p) { return p.actual + ' / ' + p.item.target; }), [kpiFmt(x.score.total)]);
+          }),
+          columnStyles: colStyles
         });
-      });
-      let y = nextY(28);
-      sectionTitle('Closing ITJ / SPPR', y);
-      doc.autoTable(Object.assign({}, tableStyle, {
-        startY: y + 8,
-        head: [['Marketing', 'Buyer', 'Proyek', 'Tahap', 'Tanggal', 'Unit', 'Nominal', 'Verifikasi', 'Diputuskan oleh']],
-        body: closing.length ? closing : [[{ content: 'Belum ada closing di bulan ini.', colSpan: 9, styles: { halign: 'center', textColor: PDF_TEXT_MUTED } }]],
-        columnStyles: { 6: { halign: 'right' } },
-        didParseCell: function (data) {
-          if (data.section !== 'body' || data.column.index !== 7) return;
-          if (data.cell.raw === 'Disetujui') { data.cell.styles.textColor = [31, 107, 72]; data.cell.styles.fontStyle = 'bold'; }
-          if (data.cell.raw === 'Ditolak') { data.cell.styles.textColor = PDF_HOT_ACCENT; data.cell.styles.fontStyle = 'bold'; }
-          if (data.cell.raw === 'Menunggu') { data.cell.styles.textColor = [138, 82, 18]; }
-        }
-      }));
+      }
 
-      // 3. Laporan Online/Offline
-      const laporan = [];
-      kpiData.rows.forEach(function (r) {
-        r.reports.forEach(function (rep) {
-          const p = String(rep.dateKey || '').split('-');
-          const detail = rep.type === 'Live TikTok' ? (rep.link || '-')
-            : ['Lokasi: ' + (rep.place || '-'), 'Izin: ' + (rep.permitFrom || '-'), 'Lapor: ' + (rep.reportGroup || '-') + (rep.reportTime ? ' jam ' + rep.reportTime : '')].join('\n');
-          laporan.push([r.name, p.length === 3 ? p[2] + '/' + p[1] + '/' + p[0] : rep.dateKey, rep.type || '-', detail, rep.note || '-',
-            rep.invalid ? 'Tidak valid' + (rep.invalidReason ? ': ' + rep.invalidReason : '') : 'Dihitung']);
+      if (opt.closing) {
+        const closing = [];
+        srcRows.forEach(function (r) {
+          r.closings.forEach(function (cl) {
+            const info = kpiClosingInfo(cl.lead, cl.key);
+            const v = cl.lead.kpiVerify && cl.lead.kpiVerify[cl.key];
+            closing.push([r.name, cl.lead.buyerName || '-', info.project || cl.lead.project || '-', kpiStageLabel(cl.key), formatDateID(cl.date),
+              info.unit || '-', formatRupiahText(info.nominal) || '-',
+              cl.status === 'approved' ? 'Disetujui' : cl.status === 'rejected' ? 'Ditolak' : 'Menunggu', (v && v.by) || '-']);
+          });
         });
-      });
-      y = nextY(28);
-      sectionTitle('Laporan Online / Offline', y);
-      doc.autoTable(Object.assign({}, tableStyle, {
-        startY: y + 8,
-        head: [['Marketing', 'Tanggal', 'Jenis', 'Bukti / Detail', 'Keterangan', 'Status']],
-        body: laporan.length ? laporan : [[{ content: 'Belum ada laporan di bulan ini.', colSpan: 6, styles: { halign: 'center', textColor: PDF_TEXT_MUTED } }]],
-        columnStyles: { 1: { cellWidth: 62 }, 2: { cellWidth: 70 }, 3: { cellWidth: 260 } },
-        didParseCell: function (data) {
-          if (data.section === 'body' && data.column.index === 5 && String(data.cell.raw).indexOf('Tidak valid') === 0) {
-            data.cell.styles.textColor = PDF_HOT_ACCENT;
+        section('Closing ITJ / SPPR', {
+          head: [['Marketing', 'Buyer', 'Proyek', 'Tahap', 'Tanggal', 'Unit', 'Nominal', 'Verifikasi', 'Diputuskan oleh']],
+          body: closing.length ? closing : [[{ content: 'Belum ada closing di bulan ini.', colSpan: 9, styles: { halign: 'center', textColor: PDF_TEXT_MUTED } }]],
+          columnStyles: { 6: { halign: 'right' } },
+          didParseCell: function (data) {
+            if (data.section !== 'body' || data.column.index !== 7) return;
+            if (data.cell.raw === 'Disetujui') { data.cell.styles.textColor = [31, 107, 72]; data.cell.styles.fontStyle = 'bold'; }
+            if (data.cell.raw === 'Ditolak') { data.cell.styles.textColor = PDF_HOT_ACCENT; data.cell.styles.fontStyle = 'bold'; }
+            if (data.cell.raw === 'Menunggu') { data.cell.styles.textColor = [138, 82, 18]; }
           }
-        }
-      }));
+        });
+      }
+
+      if (opt.laporan) {
+        const laporan = [];
+        srcRows.forEach(function (r) {
+          r.reports.forEach(function (rep) {
+            const p = String(rep.dateKey || '').split('-');
+            const detail = rep.type === 'Live TikTok' ? (rep.link || '-')
+              : ['Lokasi: ' + (rep.place || '-'), 'Izin: ' + (rep.permitFrom || '-'), 'Lapor: ' + (rep.reportGroup || '-') + (rep.reportTime ? ' jam ' + rep.reportTime : '')].join('\n');
+            laporan.push([r.name, p.length === 3 ? p[2] + '/' + p[1] + '/' + p[0] : rep.dateKey, rep.type || '-', detail, rep.note || '-',
+              rep.invalid ? 'Tidak valid' + (rep.invalidReason ? ': ' + rep.invalidReason : '') : 'Dihitung']);
+          });
+        });
+        section('Laporan Online / Offline', {
+          head: [['Marketing', 'Tanggal', 'Jenis', 'Bukti / Detail', 'Keterangan', 'Status']],
+          body: laporan.length ? laporan : [[{ content: 'Belum ada laporan di bulan ini.', colSpan: 6, styles: { halign: 'center', textColor: PDF_TEXT_MUTED } }]],
+          columnStyles: { 1: { cellWidth: 62 }, 2: { cellWidth: 70 }, 3: { cellWidth: 260 } },
+          didParseCell: function (data) {
+            if (data.section === 'body' && data.column.index === 5 && String(data.cell.raw).indexOf('Tidak valid') === 0) {
+              data.cell.styles.textColor = PDF_HOT_ACCENT;
+            }
+          }
+        });
+      }
 
       const totalPages = doc.internal.getNumberOfPages();
       for (let i = 1; i <= totalPages; i++) {
@@ -3391,10 +3422,11 @@
         doc.setFont('helvetica', 'normal');
         doc.setFontSize(8);
         doc.setTextColor.apply(doc, PDF_TEXT_MUTED);
-        doc.text(APP.companyName + ' \u2013 ' + APP.appName + ' \u2013 KPI Marketing', marginX, pageHeight - 18);
+        doc.text(APP.companyName + ' – ' + APP.appName + ' – KPI Marketing', marginX, pageHeight - 18);
         doc.text('Halaman ' + i + ' dari ' + totalPages, pageWidth - marginX, pageHeight - 18, { align: 'right' });
       }
-      doc.save('KPI-Marketing-' + kpiData.month + '.pdf');
+      const safeWho = who ? '-' + who.replace(/[^A-Za-z0-9]+/g, '_') : '';
+      doc.save('KPI-Marketing-' + kpiData.month + safeWho + '.pdf');
     }
 
     function exportKpiExcel() {
@@ -3495,6 +3527,7 @@
     }
 
     function stopKpiHome() {
+      kpiCache = {};   // logout / ganti akun: buang data KPI yang tersimpan sementara
       kpiHome = { seq: kpiHome.seq + 1, month: '', leads: null, reports: null, error: '' };
       const el = document.getElementById('kpiGaugeCard');
       if (el) el.innerHTML = '';
@@ -3662,10 +3695,24 @@
       loadKpiData();
     }
 
-    function loadKpiData() {
+    // Data KPI per bulan disimpan sementara (KPI_CACHE_MS) supaya buka-tutup menu KPI atau
+    // ganti bulan bolak-balik tidak membaca ulang database. force = true untuk ambil data terbaru.
+    const KPI_CACHE_MS = 10 * 60 * 1000;
+    let kpiCache = {};
+
+    function loadKpiData(force) {
       if (!currentUser) return;
       const seq = ++kpiLoadSeq;
       const month = kpiMonth;
+      const cacheKey = currentUser.uid + '|' + month;
+      const cached = kpiCache[cacheKey];
+      if (force !== true && cached && Date.now() - cached.loadedAt < KPI_CACHE_MS) {
+        kpiData = cached;
+        kpiLoading = false;
+        kpiError = '';
+        renderKpi();
+        return;
+      }
       const range = kpiMonthRange(month);
       const isMk = kpiIsMarketing();
       const people = isMk
@@ -3705,7 +3752,8 @@
           counts.online = kpiOnlineCount(reports);
           return { uid: p.uid, name: p.name, counts: counts, reports: reports, closings: closings };
         });
-        kpiData = { month: month, rows: rows, leadsById: leadsById };
+        kpiData = { month: month, rows: rows, leadsById: leadsById, loadedAt: Date.now() };
+        kpiCache[cacheKey] = kpiData;
         kpiLoading = false;
         renderKpi();
       }).catch(function (err) {
@@ -3744,9 +3792,13 @@
         (!isMk && kpiView === 'list' && kpiData && !kpiLoading && kpiExportMenuOpen
           ? '<div class="flex items-center gap-2 bg-[var(--brand-soft)] rounded-xl px-3 py-2.5 mb-3">' +
               '<span class="text-xs font-semibold text-[var(--muted)] mr-auto">Export KPI ' + kpiMonthLabel(kpiData.month) + ' ke:</span>' +
-              '<button type="button" id="kpiExportPdfBtn" onclick="exportKpiPdf()" class="btn-primary text-white text-xs font-semibold px-4 py-2 rounded-lg">PDF</button>' +
+              '<button type="button" id="kpiExportPdfBtn" onclick="toggleKpiPdfOptions()" class="btn-primary text-white text-xs font-semibold px-4 py-2 rounded-lg">PDF</button>' +
               '<button type="button" id="kpiExportXlsBtn" onclick="exportKpiExcel()" class="text-white text-xs font-semibold px-4 py-2 rounded-lg" style="background:#1d6f42;">Excel</button>' +
-            '</div>'
+            '</div>' + (kpiPdfOptionsOpen ? renderKpiPdfOptionsHtml() : '')
+          : '') +
+        (kpiView !== 'settings' && kpiData && !kpiLoading && kpiData.loadedAt
+          ? '<p class="text-[0.6875rem] text-[var(--muted)] -mt-1 mb-3">Data per jam ' + formatTimeID(new Date(kpiData.loadedAt)) +
+              ' &middot; <button type="button" onclick="loadKpiData(true)" class="font-semibold text-[var(--brand-dark)] underline">Muat ulang</button></p>'
           : '');
 
       if (kpiView === 'settings') { body.innerHTML = head + renderKpiSettingsHtml(items); return; }
@@ -4005,7 +4057,7 @@
       if (btn) { btn.disabled = true; btn.textContent = 'Menyimpan...'; }
       kpiReportsRef(currentUser.uid).add(doc).then(function () {
         kpiSaving = false;
-        loadKpiData();
+        loadKpiData(true);
         refreshKpiHomeReports();
       }).catch(function (err) {
         kpiSaving = false;
@@ -4019,7 +4071,7 @@
       if (!r || !id) return;
       if (!confirm('Hapus laporan ini?')) return;
       kpiReportsRef(r.uid).doc(id).delete().then(function () {
-        loadKpiData();
+        loadKpiData(true);
         refreshKpiHomeReports();
       }).catch(function (err) {
         alert('Gagal menghapus laporan: ' + err.message);
