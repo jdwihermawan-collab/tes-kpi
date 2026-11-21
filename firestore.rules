@@ -119,6 +119,12 @@ service cloud.firestore {
       allow delete: if isSuper() || (isMarketing() && isSelf(uid) && resource.data.get('invalid', false) == false);
     }
 
+    // ---------- Riwayat lonceng: 1 dokumen per akun, ditulis server (Admin SDK) ----------
+    match /notifLogs/{uid} {
+      allow read: if isSelf(uid) && isActive();
+      allow delete: if isSuper();
+    }
+
     // ---------- Log pengingat WA ----------
     match /reminderLogs/{logId} {
       allow read, create: if isStaff();

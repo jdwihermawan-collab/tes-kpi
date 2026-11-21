@@ -9,7 +9,7 @@
 //            'spam'           = nomor spam dari CS
 //            'reminderLogs'   = log pengingat WA ke marketing
 //            'activity'       = aktivitas marketing (login / update)
-//            'broadcasts'     = riwayat Kirim Notif
+//            'broadcasts'     = riwayat Kirim Notif + riwayat lonceng (notifLogs)
 //            'rotation'       = antrean giliran rotasi lead dimulai ulang
 // Akun (users, credentials, pushTokens) dan pengaturan (daftar proyek dsb.) TIDAK pernah dihapus.
 //
@@ -23,7 +23,7 @@ const ITEMS = {
   spam: ['spamNumbers'],
   reminderLogs: ['reminderLogs'],
   activity: ['marketingActivity'],
-  broadcasts: ['broadcasts']
+  broadcasts: ['broadcasts', 'notifLogs']
 };
 const TIME_BUDGET_MS = 7000;
 const PAGE = 400;

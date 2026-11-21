@@ -119,6 +119,10 @@ module.exports = async function handler(req, res) {
   const fill = function (s, u) {
     return s.replace(/\{nama\}/gi, u.name).replace(/\{jumlah\}/gi, String(counts[u.name] || 0));
   };
+  // Riwayat lonceng tiap penerima (termasuk yang belum mengaktifkan push).
+  await L.logNotifMany(recipients.map(function (u) {
+    return { uid: u.uid, msg: { title: fill(title, u), body: fill(text, u), kind: 'broadcast' } };
+  }));
   const messages = [];
   const owners = [];
   const noDevice = [];

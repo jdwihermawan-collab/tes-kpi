@@ -146,11 +146,39 @@ function uidsByName(users, name, role) {
   return users.filter(function (u) { return u.name === name && (!role || u.role === role); }).map(function (u) { return u.uid; });
 }
 
+// ---------- Riwayat lonceng (notifLogs/{uid}) ----------
+// Satu dokumen per akun berisi maks. NOTIF_LOG_MAX notifikasi terakhir, supaya aplikasi
+// cukup 1x baca untuk menampilkan riwayat di tombol lonceng. Dicatat walaupun akun belum
+// mengaktifkan push, jadi riwayatnya tetap lengkap.
+const NOTIF_LOG_MAX = 10;
+async function logNotifMany(pairs) {
+  const now = Date.now();
+  await Promise.all(pairs.filter(function (x) { return x && x.uid; }).map(function (x) {
+    const ref = db().collection('notifLogs').doc(x.uid);
+    const entry = {
+      t: now,
+      title: String(x.msg.title || '').slice(0, 120),
+      body: String(x.msg.body || '').slice(0, 300),
+      kind: String(x.msg.kind || 'info'),
+      leadId: String(x.msg.leadId || '')
+    };
+    return db().runTransaction(async function (tx) {
+      const snap = await tx.get(ref);
+      const items = snap.exists && Array.isArray(snap.data().items) ? snap.data().items : [];
+      tx.set(ref, { items: [entry].concat(items).slice(0, NOTIF_LOG_MAX), updatedAt: FieldValue.serverTimestamp() });
+    }).catch(function (e) { console.error('Gagal mencatat riwayat notif ' + x.uid + ':', e.message); });
+  }));
+}
+
 // Kirim push ke semua perangkat milik daftar uid. data.kind dipakai aplikasi untuk
 // menghindari notif ganda saat aplikasi sedang terbuka.
 async function sendToUids(uids, msg) {
   const unique = Array.from(new Set(uids.filter(Boolean)));
   if (!unique.length) return { sent: 0, failed: 0, devices: 0, removed: 0 };
+  // "Sisa 1 menit" tidak dicatat di riwayat (hanya pengingat sesaat).
+  if (msg.kind !== 'lead-warn') {
+    await logNotifMany(unique.map(function (uid) { return { uid: uid, msg: msg }; }));
+  }
   const refs = unique.map(function (u) { return db().collection('pushTokens').doc(u); });
   const snaps = await db().getAll.apply(db(), refs);
   const owners = [];
@@ -227,7 +255,7 @@ function msgLeadWarn(lead, link) {
 
 module.exports = {
   admin, initAdmin, db, FieldValue, Timestamp, readBody, baseUrl, toMillis, wibParts, authUser,
-  isStaffRole, activeUsers, rotationPool, nextCandidate, uidsByName, sendToUids, claimPushKey,
+  isStaffRole, activeUsers, rotationPool, nextCandidate, uidsByName, sendToUids, claimPushKey, logNotifMany,
   msgLeadCreated, msgLeadAssigned, msgLeadWarn, ACCEPT_WINDOW_MS, CLOSED_STATUSES,
   normalizeRotationQueue, applyReassignToQueue, nextInQueue, formatVisit
 };

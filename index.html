@@ -603,6 +603,10 @@
     z-index:40;
     color:var(--ink);
   }
+  /* HP: lonceng tidak di pojok kanan, jadi dropdown dibuat selebar layar supaya tidak terpotong. */
+  @media (max-width: 640px){
+    .notif-dropdown{ position:fixed; top:4.75rem; left:0.75rem; right:0.75rem; width:auto !important; max-width:none; max-height:70vh; }
+  }
   .notif-item{
     padding:0.75rem 1rem;
     border-bottom:1px solid var(--line);
@@ -4774,26 +4778,126 @@
       state.knownAttentionIds = currentAttention;
     }
 
-    function addNotification(scope, type, title, message, leadId) {
+    // ---------- Riwayat lonceng: 5 notifikasi terakhir ----------
+    // Dua sumber digabung:
+    //  1. Notifikasi yang muncul saat aplikasi terbuka: disimpan di browser/HP ini (localStorage), 0 read.
+    //  2. Push dari server (lead baru, Kirim Notif, pengingat): notifLogs/{uid}, SATU dokumen per akun.
+    //     Dibaca saat lonceng dibuka, paling sering sekali per NOTIF_SERVER_REFRESH_MS (1 read).
+    const NOTIF_HISTORY_SHOW = 5;
+    const NOTIF_LOCAL_KEEP = 10;
+    const NOTIF_SERVER_REFRESH_MS = 15 * 60 * 1000;
+    let serverNotifs = null;
+    let serverNotifsAt = 0;
+    let serverNotifsLoading = false;
+    let renderedNotifs = [];
+
+    function notifStoreKey() { return currentUser ? 'crmNotifLog:' + currentUser.uid : ''; }
+
+    function saveLocalNotifs() {
+      const key = notifStoreKey();
+      if (!key) return;
+      try {
+        localStorage.setItem(key, JSON.stringify(notificationLog.slice(0, NOTIF_LOCAL_KEEP).map(function (n) {
+          return { id: n.id, type: n.type, title: n.title, message: n.message, leadId: n.leadId || '', time: n.time.getTime() };
+        })));
+      } catch (e) { /* penyimpanan browser penuh / diblokir: riwayat hanya di memori */ }
+    }
+
+    // Dipanggil saat login: muat riwayat lokal akun ini.
+    function loadLocalNotifs() {
+      notificationLog.length = 0;
+      serverNotifs = null;
+      serverNotifsAt = 0;
+      const key = notifStoreKey();
+      if (key) {
+        try {
+          JSON.parse(localStorage.getItem(key) || '[]').forEach(function (n) {
+            notificationLog.push({ id: 'l' + n.id + '_' + n.time, type: n.type, title: n.title, message: n.message, leadId: n.leadId || null, time: new Date(n.time) });
+          });
+        } catch (e) {}
+      }
+      renderNotifDropdown('cs');
+      renderNotifDropdown('marketing');
+    }
+
+    function clearNotifHistoryState() {
+      notificationLog.length = 0;
+      serverNotifs = null;
+      serverNotifsAt = 0;
+      renderNotifDropdown('cs');
+      renderNotifDropdown('marketing');
+    }
+
+    // Catat ke riwayat lokal tanpa toast/pop-up (dipakai juga untuk push yang masuk saat aplikasi terbuka).
+    function recordNotif(type, title, message, leadId) {
       notifIdCounter += 1;
       notificationLog.unshift({ id: notifIdCounter, type: type, title: title, message: message, leadId: leadId, time: new Date() });
       if (notificationLog.length > 20) notificationLog.length = 20;
+      saveLocalNotifs();
       renderNotifDropdown('cs');
       renderNotifDropdown('marketing');
+    }
+
+    function addNotification(scope, type, title, message, leadId) {
+      recordNotif(type, title, message, leadId);
       pushToast({ type: type, title: title, message: message, leadId: leadId });
       sendBrowserNotification(title, message);
+    }
+
+    function refreshServerNotifs(force) {
+      if (!currentUser || serverNotifsLoading) return;
+      if (!force && serverNotifs && Date.now() - serverNotifsAt < NOTIF_SERVER_REFRESH_MS) return;
+      serverNotifsLoading = true;
+      renderNotifDropdown('cs');
+      renderNotifDropdown('marketing');
+      db.collection('notifLogs').doc(currentUser.uid).get().then(function (snap) {
+        const items = snap.exists && Array.isArray(snap.data().items) ? snap.data().items : [];
+        serverNotifs = items.map(function (it) {
+          const kind = String(it.kind || '');
+          return {
+            id: 's' + it.t, title: it.title || 'Notifikasi', message: it.body || '', leadId: it.leadId || null, time: new Date(Number(it.t) || 0),
+            type: (kind.indexOf('lead') === 0 || kind === 'broadcast') ? 'new' : 'followup'
+          };
+        });
+        serverNotifsAt = Date.now();
+      }).catch(function (err) {
+        console.error('Gagal memuat riwayat notifikasi:', err);
+      }).finally(function () {
+        serverNotifsLoading = false;
+        renderNotifDropdown('cs');
+        renderNotifDropdown('marketing');
+      });
+    }
+
+    // Gabungan riwayat lokal + server, tanpa duplikat (notif yang sama tercatat di keduanya), 5 terbaru.
+    function mergedNotifHistory() {
+      const local = notificationLog.slice();
+      const fromServer = (serverNotifs || []).filter(function (s) {
+        return !local.some(function (l) {
+          const near = Math.abs(l.time - s.time) < 10 * 60 * 1000;
+          return near && ((s.leadId && l.leadId === s.leadId) || (l.title === s.title && l.message === s.message));
+        });
+      });
+      return local.concat(fromServer).sort(function (a, b) { return b.time - a.time; }).slice(0, NOTIF_HISTORY_SHOW);
+    }
+
+    function formatNotifTime(d) {
+      const jam = String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
+      const dd = daysDiffDateOnly(new Date(), d);
+      return dd <= 0 ? jam : dd === 1 ? 'Kemarin ' + jam : formatDateID(d) + ' ' + jam;
     }
 
     function renderNotifDropdown(prefix) {
       const list = document.getElementById(prefix + 'NotifList');
       if (!list) return;
-      if (!notificationLog.length) {
-        list.innerHTML = '<p class="text-sm text-[var(--muted)] px-4 py-6 text-center">Belum ada notifikasi.</p>';
+      renderedNotifs = mergedNotifHistory();
+      if (!renderedNotifs.length) {
+        list.innerHTML = '<p class="text-sm text-[var(--muted)] px-4 py-6 text-center">' + (serverNotifsLoading ? 'Memuat riwayat...' : 'Belum ada notifikasi.') + '</p>';
         return;
       }
-      list.innerHTML = notificationLog.map(function (n) {
-        const jam = String(n.time.getHours()).padStart(2, '0') + ':' + String(n.time.getMinutes()).padStart(2, '0');
-        return '<div class="notif-item flex items-start gap-2.5" onclick="handleNotifClick(\'' + prefix + '\',' + n.id + ')">' +
+      list.innerHTML = '<p class="text-[11px] text-[#9aa79f] px-4 pt-2">' + NOTIF_HISTORY_SHOW + ' notifikasi terakhir</p>' + renderedNotifs.map(function (n) {
+        const jam = formatNotifTime(n.time);
+        return '<div class="notif-item flex items-start gap-2.5" onclick="handleNotifClick(\'' + prefix + '\',\'' + escapeHtml(String(n.id)) + '\')">' +
           '<span class="notif-dot ' + n.type + '"></span>' +
           '<div class="flex-1 min-w-0">' +
             '<p class="text-sm font-semibold leading-tight">' + escapeHtml(n.title) + '</p>' +
@@ -4805,7 +4909,7 @@
     }
 
     function handleNotifClick(prefix, notifId) {
-      const entry = notificationLog.find(function (n) { return n.id === notifId; });
+      const entry = renderedNotifs.find(function (n) { return String(n.id) === String(notifId); });
       closeNotifDropdown(prefix);
       if (entry && entry.leadId && findLeadById(entry.leadId)) {
         openDetailModal(entry.leadId);
@@ -4820,6 +4924,7 @@
       closeNotifDropdown('marketing');
       if (isHidden) {
         dd.classList.remove('hidden');
+        refreshServerNotifs(false);   // 1 read, paling sering sekali per 15 menit
         const permBtn = document.getElementById(prefix + 'NotifPermBtn');
         if (permBtn) {
           const alreadyGranted = ('Notification' in window) && Notification.permission === 'granted';
@@ -5010,6 +5115,7 @@
 
     function routeToRole(role, displayName) {
       maybeRequestNotifPermission();
+      loadLocalNotifs();
       const manageBtn = document.getElementById('csManageBtn');
       if (manageBtn) manageBtn.classList.add('hidden');
       const testPushBtn = document.getElementById('csTestPushBtn');
@@ -5075,6 +5181,7 @@
       if (manageModalOpen) closeManageModal();
       if (kpiModalOpen) closeKpiModal();
       stopKpiHome();
+      clearNotifHistoryState();
     }
 
     // ------------------------------------------------------------
@@ -5877,6 +5984,7 @@
             const title = n.title || 'Notifikasi';
             const body = n.body || '';
             pushToast({ type: 'new', title: title, message: body });
+            recordNotif(kind === 'broadcast' || kind.indexOf('lead') === 0 ? 'new' : 'followup', title, body, (payload.data && payload.data.leadId) || null);
             reg.showNotification(title, { body: body, icon: '/icons/icon-192.png', tag: 'crm-fg-' + Date.now() }).catch(function () {});
           });
         }
@@ -7601,7 +7709,7 @@
       { key: 'spam', label: 'Nomor spam', hint: 'Input Spam dari CS (tampil di Riwayat).' },
       { key: 'reminderLogs', label: 'Log pengingat WA', hint: 'Catatan siapa yang mengingatkan marketing lewat WA.' },
       { key: 'activity', label: 'Aktivitas marketing', hint: 'Catatan login dan update data tiap marketing.' },
-      { key: 'broadcasts', label: 'Riwayat Kirim Notif', hint: 'Daftar notif/pengumuman yang pernah dikirim.' },
+      { key: 'broadcasts', label: 'Riwayat Kirim Notif', hint: 'Daftar notif/pengumuman yang pernah dikirim, termasuk riwayat di tombol lonceng.' },
       { key: 'rotation', label: 'Antrean giliran rotasi', noCount: true, hint: 'Giliran lead dimulai lagi dari marketing urutan pertama.' }
     ];
     let resetState = { counts: null, loading: false, error: '', checked: {} };
