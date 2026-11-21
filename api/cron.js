@@ -10,6 +10,10 @@
 //  3. Cadangan: lead baru yang push "lead masuk"-nya belum terkirim -> dikirim.
 //  4. Setiap hari jam 09:00 WIB -> push ringkasan follow-up hari ini ke tiap marketing.
 //  5. Setiap hari jam 08:00 WIB -> pengingat janji kunjungan hari ini ke SPV/Manager & marketing-nya.
+//  6. KPI: setiap hari jam 16:00 WIB (kecuali Minggu) -> pengingat ke marketing yang hari itu belum
+//     melapor Live TikTok / Canvasing.
+//  7. KPI: tanggal 20 jam 10:00 WIB (sekali sebulan) -> marketing yang skornya di bawah jalur diberi
+//     tahu skor & indikator yang paling perlu dikejar; SPV/Manager dapat ringkasannya.
 //
 // Hemat kuota Firestore: data akun (koleksi users) hanya dibaca kalau ada lead yang
 // menunggu diterima, atau saat pengingat harian benar-benar dikirim. Kalau tidak ada
@@ -19,8 +23,11 @@
 //   CRON_SECRET = kata sandi bebas (acak & panjang), sama dengan ?key= di cron-job.org
 //   DAILY_REMINDER_HOUR (opsional) = jam pengingat harian WIB, default 9
 //   VISIT_REMINDER_HOUR (opsional) = jam pengingat kunjungan WIB, default 8
+//   REPORT_REMINDER_HOUR (opsional) = jam pengingat laporan Live/Canvasing WIB, default 16
+//   KPI_PACE_DAY / KPI_PACE_HOUR (opsional) = tanggal & jam pengingat KPI WIB, default 20 & 10
 // ============================================================
 const L = require('./_lib');
+const K = require('./_kpi');
 
 const WARN_WINDOW_MS = 90 * 1000;
 
@@ -205,6 +212,78 @@ async function visitReminder(loadUsers, link, now, out) {
   out.visits = visits.length;
 }
 
+// Penanda "sudah dikirim" per hari/bulan (atomik), supaya cron yang jalan tiap menit hanya kirim sekali.
+async function claimDaily(docId, key) {
+  const flagRef = L.db().collection('settings').doc(docId);
+  return L.db().runTransaction(async function (tx) {
+    const s = await tx.get(flagRef);
+    if (s.exists && s.data().lastKey === key) return false;
+    tx.set(flagRef, { lastKey: key, sentAt: L.FieldValue.serverTimestamp() }, { merge: true });
+    return true;
+  });
+}
+
+// 6. Pengingat laporan Live TikTok / Canvasing (jam 16:00 WIB, Senin-Sabtu).
+//    1 baca per marketing (cek apakah hari ini sudah ada laporan yang valid).
+async function reportReminder(loadUsers, link, now, out) {
+  const hour = Number(process.env.REPORT_REMINDER_HOUR || 16);
+  const t = L.wibParts(now);
+  if (t.hour !== hour) return;
+  const weekday = new Date(now + 7 * 3600 * 1000).getUTCDay();   // 0 = Minggu (WIB)
+  if (weekday === 0) return;
+  if (!(await claimDaily('pushReport', t.dateKey))) return;
+  const users = await loadUsers();
+  for (const u of users.filter(function (x) { return x.role === 'Marketing'; })) {
+    const snap = await L.db().collection('kpiReports').doc(u.uid).collection('kpiItems').where('dateKey', '==', t.dateKey).get();
+    const hasValid = snap.docs.some(function (d) { return !d.data().invalid; });
+    if (hasValid) continue;
+    await L.sendToUids([u.uid], {
+      kind: 'kpi-report', link: link, tag: 'kpi-report-' + t.dateKey,
+      title: 'Belum ada laporan Live / Canvasing hari ini',
+      body: 'Hai ' + u.name + ', lapor Live TikTok atau Canvasing hari ini supaya KPI Online/Offline kamu bertambah. Buka CRM > Lapor Live / Canvasing.'
+    });
+    out.reportReminders++;
+  }
+}
+
+// 7. Pengingat KPI di bawah jalur (tanggal 20 jam 10:00 WIB, sekali sebulan).
+async function kpiPaceReminder(loadUsers, link, now, out) {
+  const day = Number(process.env.KPI_PACE_DAY || 20);
+  const hour = Number(process.env.KPI_PACE_HOUR || 10);
+  const t = L.wibParts(now);
+  if (Number(t.dateKey.slice(8, 10)) !== day || t.hour !== hour) return;
+  const ym = t.dateKey.slice(0, 7);
+  if (!(await claimDaily('pushKpiPace', ym))) return;
+  const users = await loadUsers();
+  const marketing = users.filter(function (x) { return x.role === 'Marketing'; });
+  if (!marketing.length) return;
+  const res = await K.monthKpi(ym, marketing);
+  const paceScore = day / res.range.daysInMonth * 100;   // skor yang seharusnya sudah dicapai
+  const below = res.rows.filter(function (r) { return r.score.total < paceScore; })
+    .sort(function (a, b) { return a.score.total - b.score.total; });
+  for (const r of below) {
+    const worst = r.score.parts.slice().sort(function (a, b) { return b.missing - a.missing; })
+      .filter(function (p) { return p.missing > 0.05; }).slice(0, 2)
+      .map(function (p) { return p.item.label + ' ' + p.actual + '/' + p.item.target; });
+    await L.sendToUids([r.user.uid], {
+      kind: 'kpi-pace', link: link, tag: 'kpi-pace-' + ym, sticky: true,
+      title: 'KPI ' + res.range.label + ': skor ' + K.fmt1(r.score.total) + ' dari 100',
+      body: 'Hari ini tanggal ' + day + ', jalurnya seharusnya sekitar ' + K.fmt1(paceScore) + '. ' +
+        (worst.length ? 'Paling perlu dikejar: ' + worst.join(', ') + '. ' : '') + 'Masih ada waktu, semangat!'
+    });
+    out.kpiPace++;
+  }
+  if (below.length) {
+    const adminUids = users.filter(function (u) { return u.role === 'Admin'; }).map(function (u) { return u.uid; });
+    await L.sendToUids(adminUids, {
+      kind: 'kpi-pace', link: link, tag: 'kpi-pace-spv-' + ym,
+      title: below.length + ' marketing di bawah jalur KPI ' + res.range.label,
+      body: below.slice(0, 6).map(function (r) { return r.user.name + ' ' + K.fmt1(r.score.total); }).join(', ') +
+        (below.length > 6 ? ', dan ' + (below.length - 6) + ' lainnya' : '') + '. Jalur tanggal ' + day + ': ' + K.fmt1(paceScore) + '.'
+    });
+  }
+}
+
 module.exports = async function handler(req, res) {
   const secret = process.env.CRON_SECRET;
   if (!secret) return res.status(500).json({ error: 'CRON_SECRET belum diisi di Vercel.' });
@@ -215,7 +294,7 @@ module.exports = async function handler(req, res) {
 
   const now = Date.now();
   const link = L.baseUrl(req);
-  const out = { pending: 0, created: 0, warned: 0, reassigned: 0, exhausted: 0, escalated: 0, daily: 0, visits: 0, errors: [] };
+  const out = { pending: 0, created: 0, warned: 0, reassigned: 0, exhausted: 0, escalated: 0, daily: 0, visits: 0, reportReminders: 0, kpiPace: 0, errors: [] };
 
   // Data akun dibaca sekali saja per panggilan, dan hanya kalau memang dibutuhkan.
   let usersPromise = null;
@@ -240,6 +319,12 @@ module.exports = async function handler(req, res) {
 
   try { await visitReminder(loadUsers, link, now, out); }
   catch (e) { out.errors.push('visit: ' + e.message); }
+
+  try { await reportReminder(loadUsers, link, now, out); }
+  catch (e) { out.errors.push('report: ' + e.message); }
+
+  try { await kpiPaceReminder(loadUsers, link, now, out); }
+  catch (e) { out.errors.push('kpiPace: ' + e.message); }
 
   return res.json(out);
 };

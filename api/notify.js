@@ -3,6 +3,8 @@
 //   Header : Authorization: Bearer <Firebase ID token>
 //   Body   : { event: 'lead-created' | 'lead-reassigned' | 'lead-accepted' |
 //                     'visit-scheduled' | 'visit-cancelled', leadId }
+//            { event: 'closing-submitted' | 'closing-verified', leadId, stage: 'itj' | 'sppr' }  (KPI)
+//            { event: 'report-invalid', uid, reportId }                                     (KPI)
 // Server selalu membaca ulang data lead dari Firestore (isi pesan tidak diambil dari
 // pengirim) dan mencatat pushKeys di lead supaya notif yang sama tidak terkirim dua kali.
 // ============================================================
@@ -18,6 +20,32 @@ module.exports = async function handler(req, res) {
   const body = L.readBody(req);
   const event = String(body.event || '');
   const leadId = String(body.leadId || '');
+  const role0 = caller.profile.role;
+
+  // KPI: laporan Live/Canvasing ditandai tidak valid oleh SPV/Super Admin -> beri tahu marketing-nya.
+  if (event === 'report-invalid') {
+    if (role0 !== 'Admin' && role0 !== 'SuperAdmin') return res.status(403).json({ error: 'Tidak diizinkan.' });
+    const uid = String(body.uid || '');
+    const reportId = String(body.reportId || '');
+    if (!uid || !reportId) return res.status(400).json({ error: 'Data laporan kosong.' });
+    const repRef = L.db().collection('kpiReports').doc(uid).collection('kpiItems').doc(reportId);
+    const rs = await repRef.get();
+    if (!rs.exists) return res.status(404).json({ error: 'Laporan tidak ditemukan.' });
+    const rep = rs.data();
+    if (!rep.invalid) return res.json({ skipped: 'laporan valid' });
+    const stamp = L.toMillis(rep.invalidAt);
+    if (rep.invalidNotified === stamp) return res.json({ skipped: 'sudah dikirim' });
+    await repRef.update({ invalidNotified: stamp });
+    const d = String(rep.dateKey || '');
+    const r = await L.sendToUids([uid], {
+      kind: 'kpi-report-invalid', link: L.baseUrl(req), tag: 'kpi-invalid-' + reportId,
+      title: 'Laporan ' + (rep.type || '') + ' ' + d.slice(8, 10) + '/' + d.slice(5, 7) + ' tidak valid',
+      body: (rep.invalidReason ? 'Alasan: ' + rep.invalidReason + '. ' : '') + 'Ditandai oleh ' + (rep.invalidBy || 'SPV') +
+        '. Laporan ini tidak dihitung di KPI.'
+    });
+    return res.json(r);
+  }
+
   if (!leadId) return res.status(400).json({ error: 'leadId kosong.' });
 
   const ref = L.db().collection('leads').doc(leadId);
@@ -76,6 +104,44 @@ module.exports = async function handler(req, res) {
       title: 'Kunjungan dibatalkan',
       body: 'Kunjungan ' + (lead.buyerName || '-') + ' (' + (lead.project || '-') + ') ' + lead.visitCancelled +
         ' dibatalkan oleh ' + who + '.'
+    });
+    return res.json(r);
+  }
+
+  // KPI: marketing mengubah status ke Closing ITJ / SPPR -> SPV/Manager diminta memverifikasi.
+  if (event === 'closing-submitted') {
+    const stage = body.stage === 'sppr' ? 'sppr' : body.stage === 'itj' ? 'itj' : '';
+    if (role !== 'Marketing' || lead.assignedTo !== caller.profile.name || !stage) return res.status(403).json({ error: 'Tidak diizinkan.' });
+    const info = (lead.closingInfo || {})[stage];
+    if (!info) return res.json({ skipped: 'tidak ada data closing' });
+    if (!(await L.claimPushKey(ref, 'closing-' + stage + '-' + L.toMillis(info.at)))) return res.json({ skipped: 'sudah dikirim' });
+    const label = stage === 'itj' ? 'Closing ITJ' : 'Closing SPPR';
+    const nominal = String(info.nominal || '').replace(/\D/g, '').replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+    const adminUids = users.filter(function (u) { return u.role === 'Admin'; }).map(function (u) { return u.uid; });
+    const r = await L.sendToUids(adminUids, {
+      kind: 'kpi-closing', leadId: leadId, link: link, tag: 'closing-' + leadId, sticky: true,
+      title: label + ' dari ' + caller.profile.name + ' perlu diverifikasi',
+      body: (lead.buyerName || '-') + ' \u00b7 ' + (info.project || lead.project || '-') + ' unit ' + (info.unit || '-') +
+        (nominal ? ' \u00b7 Rp ' + nominal : '') + '. Buka menu KPI untuk menyetujui.'
+    });
+    return res.json(r);
+  }
+
+  // KPI: SPV/Super Admin menyetujui / menolak closing -> beri tahu marketing pemilik lead.
+  if (event === 'closing-verified') {
+    const stage = body.stage === 'sppr' ? 'sppr' : body.stage === 'itj' ? 'itj' : '';
+    if ((role !== 'Admin' && role !== 'SuperAdmin') || !stage) return res.status(403).json({ error: 'Tidak diizinkan.' });
+    const v = (lead.kpiVerify || {})[stage];
+    if (!v || (v.status !== 'approved' && v.status !== 'rejected')) return res.json({ skipped: 'belum diputuskan' });
+    if (!(await L.claimPushKey(ref, 'verify-' + stage + '-' + v.status + '-' + L.toMillis(v.at)))) return res.json({ skipped: 'sudah dikirim' });
+    const label = stage === 'itj' ? 'Closing ITJ' : 'Closing SPPR';
+    const ok = v.status === 'approved';
+    const r = await L.sendToUids(L.uidsByName(users, lead.assignedTo, 'Marketing'), {
+      kind: 'kpi-verify', leadId: leadId, link: link, tag: 'verify-' + leadId + '-' + stage,
+      title: label + (ok ? ' disetujui' : ' ditolak'),
+      body: (lead.buyerName || '-') + ' (' + (lead.project || '-') + ') ' + (ok
+        ? 'sudah diverifikasi ' + (v.by || 'SPV') + ' dan masuk skor KPI kamu.'
+        : 'ditolak oleh ' + (v.by || 'SPV') + ', jadi tidak dihitung di KPI. Hubungi SPV untuk detailnya.')
     });
     return res.json(r);
   }
