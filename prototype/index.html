@@ -1,0 +1,498 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#F2F2F7">
+<title>Lead Tracker — Prototype Tampilan</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<!--
+  PROTOTYPE TAMPILAN (data contoh, tanpa Firebase).
+  Tidak dipakai aplikasi utama. Dibuka di /prototype/ untuk mencoba arah desain baru:
+  bersih, gaya iOS (grouped list, large title, bottom sheet, tab bar), prioritas HP.
+-->
+<style>
+  :root{
+    --bg:#F2F2F7; --card:#FFFFFF; --fill:#EEEEF3; --fill2:#E5E5EA;
+    --label:#1C1C1E; --label2:#6C6C70; --label3:#AEAEB2; --sep:rgba(60,60,67,.13);
+    --tint:#2B45B8; --tint-soft:#E9EDFB;
+    --green:#30A46C; --green-soft:#E6F6EE; --orange:#E8890C; --orange-soft:#FDF1E1; --red:#E5484D; --red-soft:#FDECEC;
+    --r-card:18px; --r-row:14px; --r-btn:14px;
+    --safe-b:env(safe-area-inset-bottom,0px);
+  }
+  *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+  html,body{background:var(--bg);color:var(--label);font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text","Inter",system-ui,sans-serif;font-size:17px;line-height:1.3;-webkit-font-smoothing:antialiased}
+  body{min-height:100vh}
+  button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
+  input,select,textarea{font:inherit;color:inherit}
+  .app{max-width:440px;margin:0 auto;min-height:100vh;position:relative;background:var(--bg);overflow-x:hidden}
+
+  /* ---------- header ---------- */
+  .top{position:sticky;top:0;z-index:20;padding:10px 16px 6px;background:rgba(242,242,247,.86);backdrop-filter:saturate(180%) blur(18px);-webkit-backdrop-filter:saturate(180%) blur(18px)}
+  .top-row{display:flex;align-items:center;justify-content:space-between;min-height:36px}
+  .top-mini{font-size:13px;color:var(--label2);font-weight:500}
+  .icon-btn{width:36px;height:36px;border-radius:50%;background:var(--card);display:inline-flex;align-items:center;justify-content:center;position:relative}
+  .icon-btn svg{width:19px;height:19px}
+  .dot-badge{position:absolute;top:6px;right:7px;width:8px;height:8px;border-radius:50%;background:var(--red);box-shadow:0 0 0 2px var(--card)}
+  .large-title{font-size:32px;font-weight:700;letter-spacing:-.02em;padding:4px 0 2px}
+  .screen{padding:4px 16px calc(96px + var(--safe-b))}
+
+  /* ---------- section / cards / grouped list ---------- */
+  .section-h{display:flex;justify-content:space-between;align-items:baseline;margin:22px 4px 8px}
+  .section-h h2{font-size:20px;font-weight:700;letter-spacing:-.01em}
+  .section-h .link{font-size:15px;color:var(--tint);font-weight:500}
+  .foot{font-size:13px;color:var(--label2);margin:6px 16px 0;line-height:1.35}
+  .card{background:var(--card);border-radius:var(--r-card);padding:16px}
+  .group{background:var(--card);border-radius:var(--r-card);overflow:hidden}
+  .row{display:flex;align-items:center;gap:12px;padding:12px 16px;min-height:52px;position:relative;width:100%;text-align:left}
+  .row + .row::before{content:"";position:absolute;top:0;left:16px;right:0;height:.5px;background:var(--sep)}
+  .row.ind + .row.ind::before{left:62px}
+  .row:active{background:var(--fill)}
+  .row .main{flex:1;min-width:0}
+  .row .t{font-size:16px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .row .s{font-size:13.5px;color:var(--label2);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .row .v{font-size:15px;color:var(--label2);white-space:nowrap}
+  .chev{width:8px;height:13px;flex:none;color:var(--label3)}
+  .avatar{width:38px;height:38px;border-radius:50%;flex:none;display:flex;align-items:center;justify-content:center;font-weight:600;font-size:15px;color:#fff}
+  .pill{display:inline-flex;align-items:center;gap:5px;font-size:12px;font-weight:600;padding:3px 9px;border-radius:999px;white-space:nowrap}
+  .pill i{width:6px;height:6px;border-radius:50%;background:currentColor;display:block}
+  .p-blue{background:var(--tint-soft);color:var(--tint)} .p-green{background:var(--green-soft);color:#1F7A4D}
+  .p-orange{background:var(--orange-soft);color:#A55E00} .p-red{background:var(--red-soft);color:#C02B30} .p-gray{background:var(--fill);color:var(--label2)}
+
+  /* ---------- buttons / inputs ---------- */
+  .btn{display:flex;align-items:center;justify-content:center;gap:8px;height:50px;border-radius:var(--r-btn);font-weight:600;font-size:16.5px;width:100%}
+  .btn-primary{background:var(--tint);color:#fff}
+  .btn-primary:active{opacity:.85}
+  .btn-tinted{background:var(--tint-soft);color:var(--tint)}
+  .btn-plain{color:var(--tint);font-weight:500;height:auto;width:auto;font-size:16px}
+  .btn-sm{height:34px;padding:0 14px;border-radius:999px;font-size:14.5px;width:auto}
+  .field{background:var(--card);border-radius:var(--r-row);padding:0 16px}
+  .field label{display:block;font-size:12.5px;color:var(--label2);padding-top:9px}
+  .field input,.field select,.field textarea{width:100%;border:0;outline:0;background:transparent;font-size:16.5px;padding:2px 0 10px}
+  .field textarea{resize:none;min-height:66px}
+  .field + .field{margin-top:10px}
+  .search{display:flex;align-items:center;gap:8px;background:var(--fill2);border-radius:12px;height:38px;padding:0 10px;color:var(--label2);margin-top:8px}
+  .search input{flex:1;border:0;outline:0;background:transparent;font-size:16px}
+  .seg{display:flex;background:var(--fill2);border-radius:10px;padding:2px;margin-top:10px}
+  .seg button{flex:1;height:30px;border-radius:8px;font-size:13.5px;font-weight:500;color:var(--label)}
+  .seg button.on{background:var(--card);box-shadow:0 1px 3px rgba(0,0,0,.12),0 0 0 .5px rgba(0,0,0,.04);font-weight:600}
+
+  /* ---------- tab bar ---------- */
+  .tabbar{position:fixed;left:50%;transform:translateX(-50%);bottom:0;width:100%;max-width:440px;z-index:30;display:flex;justify-content:space-around;
+    padding:6px 8px calc(6px + var(--safe-b));background:rgba(249,249,251,.88);backdrop-filter:saturate(180%) blur(20px);-webkit-backdrop-filter:saturate(180%) blur(20px);border-top:.5px solid var(--sep)}
+  .tab{flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;font-size:10.5px;font-weight:500;color:var(--label3);padding:4px 0}
+  .tab svg{width:25px;height:25px}
+  .tab.on{color:var(--tint)}
+
+  /* ---------- sheet ---------- */
+  .scrim{position:fixed;inset:0;background:rgba(0,0,0,.28);z-index:40;opacity:0;pointer-events:none;transition:opacity .25s}
+  .scrim.on{opacity:1;pointer-events:auto}
+  .sheet{position:fixed;left:50%;bottom:0;width:100%;max-width:440px;z-index:41;background:var(--bg);border-radius:22px 22px 0 0;max-height:92vh;overflow-y:auto;
+    transform:translate(-50%,105%);transition:transform .32s cubic-bezier(.2,.8,.2,1);padding:0 16px calc(24px + var(--safe-b))}
+  .sheet.on{transform:translate(-50%,0)}
+  .grabber{width:38px;height:5px;border-radius:3px;background:var(--label3);opacity:.55;margin:8px auto 4px}
+  .sheet-head{display:flex;align-items:center;justify-content:space-between;padding:6px 0 12px;position:sticky;top:0;background:var(--bg);z-index:2}
+  .sheet-head h3{font-size:17px;font-weight:600}
+
+  /* ---------- misc ---------- */
+  .stat3{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:14px}
+  .stat3 div{background:var(--fill);border-radius:12px;padding:10px 10px 9px}
+  .stat3 b{display:block;font-size:19px;font-weight:700;letter-spacing:-.01em}
+  .stat3 span{font-size:12px;color:var(--label2)}
+  .bar{height:5px;border-radius:3px;background:var(--fill2);overflow:hidden}
+  .bar i{display:block;height:100%;border-radius:3px;background:var(--tint)}
+  .muted{color:var(--label2)}
+  .tiny{font-size:12.5px}
+  .hstack{display:flex;align-items:center;gap:10px}
+  .spacer{flex:1}
+  .proto-tag{font-size:11.5px;color:var(--label2);background:var(--card);border-radius:999px;padding:4px 10px;display:inline-block}
+  .actions{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin:14px 0 4px}
+  .actions button{background:var(--card);border-radius:14px;padding:10px 0 9px;display:flex;flex-direction:column;align-items:center;gap:5px;font-size:12.5px;font-weight:500;color:var(--tint)}
+  .actions svg{width:22px;height:22px}
+  .timeline{position:relative;padding-left:18px}
+  .timeline::before{content:"";position:absolute;left:5px;top:6px;bottom:6px;width:1.5px;background:var(--fill2)}
+  .tl{position:relative;padding:0 0 14px}
+  .tl::before{content:"";position:absolute;left:-17px;top:5px;width:9px;height:9px;border-radius:50%;background:var(--card);box-shadow:0 0 0 2px var(--label3)}
+  .tl.now::before{box-shadow:0 0 0 2px var(--tint);background:var(--tint)}
+  .check{width:20px;height:20px;color:var(--tint)}
+  .toast{position:fixed;left:50%;top:14px;transform:translate(-50%,-80px);background:rgba(30,30,32,.92);color:#fff;font-size:14.5px;font-weight:500;padding:10px 16px;border-radius:14px;z-index:60;transition:transform .3s cubic-bezier(.2,.8,.2,1);max-width:88vw}
+  .toast.on{transform:translate(-50%,0)}
+  .hidden{display:none !important}
+  .login{min-height:100vh;display:flex;flex-direction:column;justify-content:center;padding:24px 24px calc(24px + var(--safe-b))}
+  .logo{width:64px;height:64px;border-radius:16px;background:var(--tint);display:flex;align-items:center;justify-content:center;margin-bottom:18px}
+  .ring-wrap{position:relative;width:132px;height:132px;flex:none}
+  .ring-wrap .ring-num{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center}
+  .ring-num b{font-size:30px;font-weight:700;letter-spacing:-.02em}
+  .ring-num span{font-size:12px;color:var(--label2)}
+  .countdown{font-variant-numeric:tabular-nums;font-size:28px;font-weight:700;letter-spacing:-.01em}
+</style>
+</head>
+<body>
+<div class="app" id="app">
+
+  <!-- ================= LOGIN ================= -->
+  <div id="vLogin" class="login">
+    <div class="logo"><svg width="34" height="34" viewBox="0 0 24 24" fill="none"><path d="M4 11.5 12 4l8 7.5M6 10v9a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1v-9M10 20v-5h4v5" stroke="#fff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+    <div style="font-size:30px;font-weight:700;letter-spacing:-.02em">Lead Tracker</div>
+    <div class="muted" style="margin-top:4px">Podorukun Group</div>
+    <div style="margin-top:32px">
+      <div class="field"><label>ID</label><input id="loginId" value="marketing1" autocomplete="off"></div>
+      <div class="field"><label>Password</label><input type="password" value="marketing1"></div>
+    </div>
+    <button class="btn btn-primary" style="margin-top:22px" onclick="login()">Masuk</button>
+    <p class="foot" style="text-align:center;margin-top:16px">Prototype tampilan · data contoh</p>
+  </div>
+
+  <!-- ================= APP ================= -->
+  <div id="vApp" class="hidden">
+    <div class="top">
+      <div class="top-row">
+        <span class="top-mini" id="topDate"></span>
+        <div class="hstack" style="gap:8px">
+          <button class="icon-btn" onclick="openSheet('notif')" aria-label="Notifikasi"><svg viewBox="0 0 24 24" fill="none"><path d="M18 16v-5a6 6 0 1 0-12 0v5l-1.5 2h15L18 16Z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><path d="M10 20.5a2 2 0 0 0 4 0" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg><span class="dot-badge"></span></button>
+          <button class="icon-btn" id="topAvatar" onclick="go('more')" style="font-weight:600;font-size:15px;color:var(--tint)">D</button>
+        </div>
+      </div>
+      <div class="large-title" id="topTitle">Beranda</div>
+    </div>
+    <div id="screen" class="screen"></div>
+  </div>
+
+  <nav class="tabbar hidden" id="tabbar"></nav>
+</div>
+
+<div class="scrim" id="scrim" onclick="closeSheet()"></div>
+<div class="sheet" id="sheet"><div class="grabber"></div><div id="sheetBody"></div></div>
+<div class="toast" id="toast"></div>
+
+<script>
+// ======================= DATA CONTOH =======================
+const ME = { name: 'Dimas Pratama', short: 'Dimas' };
+const KPI = [
+  { k: 'Online / Offline', a: 17, t: 26, w: 10, unit: 'hari' },
+  { k: 'Database Baru', a: 52, t: 78, w: 10, unit: 'lead' },
+  { k: 'Follow Up', a: 168, t: 250, w: 10, unit: 'kali' },
+  { k: 'User Survey', a: 3, t: 4, w: 15, unit: 'user' },
+  { k: 'Walk-in', a: 2, t: 2, w: 5, unit: 'user' },
+  { k: 'Closing ITJ', a: 1, t: 1, w: 15, unit: 'user' },
+  { k: 'Closing SPPR', a: 0, t: 1, w: 35, unit: 'user', pending: 1 }
+];
+const TREND = [['Jun', 41.2], ['Jul', 55.8], ['Agu', 48.1], ['Sep', 67.4], ['Okt', 72.9], ['Nov', null]];
+const STATUS = {
+  'New': 'p-blue', 'Awal Chat': 'p-blue', 'Follow-Up 1': 'p-gray', 'Follow-Up 2': 'p-gray', 'Follow-Up 3': 'p-gray',
+  'Site Visit': 'p-orange', 'Closing ITJ': 'p-green', 'Closing SPPR': 'p-green', 'Lost (Batal)': 'p-red'
+};
+const LEADS = [
+  { id: 1, n: 'Ibu Rina Kartika', p: 'Atlantis Icon', s: 'Follow-Up 2', src: 'Iklan Meta', wa: '0812 3456 7890', due: 'Hari ini', hot: true },
+  { id: 2, n: 'Bapak Hendra Wijaya', p: 'Atlantis Hills', s: 'Site Visit', src: 'Expo', wa: '0813 2211 9087', due: 'Hari ini', visit: 'Sabtu, 28/11 · 10.00' },
+  { id: 3, n: 'Ibu Maya Lestari', p: 'Permata Tunggulwulung', s: 'Awal Chat', src: 'Live TikTok', wa: '0857 7788 1200', due: 'Hari ini' },
+  { id: 4, n: 'Bapak Agus Santoso', p: 'Aya Sophia Residence', s: 'Closing ITJ', src: 'Referral', wa: '0811 9090 4411', due: 'Besok' },
+  { id: 5, n: 'Ibu Dewi Anggraini', p: 'Atlantis Green City', s: 'Follow-Up 1', src: 'Walk-in', wa: '0878 3344 5566', due: 'Besok' },
+  { id: 6, n: 'Bapak Yoga Prasetyo', p: 'Atlantis Icon', s: 'New', src: 'Iklan Meta', wa: '0819 1122 3344', due: 'Hari ini' },
+  { id: 7, n: 'Ibu Lestari Putri', p: 'Atlantis Hills', s: 'Follow-Up 3', src: 'Media Sosial', wa: '0812 9988 7766', due: '27 Nov' },
+  { id: 8, n: 'Bapak Fajar Nugroho', p: 'Atlantis Icon', s: 'Closing SPPR', src: 'Expo', wa: '0813 5566 7788', due: '—' }
+];
+const TEAM_BASE = [['Sinta Maharani', 84.6], ['Raka Aditya', 66.1], ['Wulan Sari', 58.9], ['Bima Saputra', 47.3], ['Nadia Putri', 39.8]];
+// skor Dimas mengikuti data KPI contoh supaya sama di semua layar
+const teamRows = () => TEAM_BASE.concat([[ME.name, score()]]).sort((a, b) => b[1] - a[1]);
+const NOTIF = [
+  ['Lead baru masuk', 'Atlantis Icon · Iklan Meta. Tekan Terima sebelum 14.37', 'Baru saja', 'blue'],
+  ['Closing ITJ disetujui', 'Bapak Agus Santoso sudah diverifikasi SPV 1 dan masuk skor KPI.', '10.12', 'green'],
+  ['Jadwal follow-up hari ini', 'Ada 4 lead yang perlu dihubungi hari ini.', '09.00', 'gray'],
+  ['Kunjungan hari ini', 'Bapak Hendra Wijaya · Atlantis Hills jam 10.00', '08.00', 'orange'],
+  ['Pengumuman', 'Rapat evaluasi bulanan Jumat jam 16.00 di kantor pemasaran.', 'Kemarin', 'gray']
+];
+const COLORS = ['#2B45B8', '#30A46C', '#E8890C', '#8E4EC6', '#0E8DA8', '#C2410C'];
+
+// ======================= STATE =======================
+let role = 'marketing';
+let tab = 'home';
+let leadSeg = 'semua';
+let kpiSeg = 'bulan';
+let pendingSecs = 4 * 60 + 32;
+
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const fmt = (n) => String(Math.round(n * 10) / 10).replace('.', ',');
+const chev = '<svg class="chev" viewBox="0 0 8 13" fill="none"><path d="M1.5 1.5 6.5 6.5l-5 5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+const initials = (n) => n.replace(/^(Ibu|Bapak)\s+/, '').split(' ').map((w) => w[0]).slice(0, 2).join('');
+const pill = (s) => '<span class="pill ' + (STATUS[s] || 'p-gray') + '">' + esc(s) + '</span>';
+function score() { return KPI.reduce((sum, x) => sum + Math.min(x.a / x.t, 1) * x.w, 0); }
+
+const ICON = {
+  home: '<svg viewBox="0 0 24 24" fill="none"><path d="M4 10.5 12 4l8 6.5V19a1 1 0 0 1-1 1h-4.5v-5.5h-5V20H5a1 1 0 0 1-1-1v-8.5Z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/></svg>',
+  leads: '<svg viewBox="0 0 24 24" fill="none"><circle cx="9" cy="8" r="3.2" stroke="currentColor" stroke-width="1.7"/><path d="M3.5 19c.6-3 2.8-4.6 5.5-4.6s4.9 1.6 5.5 4.6" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/><path d="M15.5 5.2a3 3 0 0 1 0 5.6M17.5 14.6c1.6.6 2.7 2 3 4.4" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>',
+  kpi: '<svg viewBox="0 0 24 24" fill="none"><path d="M4 20V10M10 20V4M16 20v-7M21 20H3" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>',
+  team: '<svg viewBox="0 0 24 24" fill="none"><path d="M4 19.5h16M6.5 16V9.5M12 16V5.5M17.5 16v-4" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/><circle cx="17.5" cy="6.5" r="2" stroke="currentColor" stroke-width="1.7"/></svg>',
+  more: '<svg viewBox="0 0 24 24" fill="none"><circle cx="6" cy="12" r="1.6" fill="currentColor"/><circle cx="12" cy="12" r="1.6" fill="currentColor"/><circle cx="18" cy="12" r="1.6" fill="currentColor"/></svg>',
+  wa: '<svg viewBox="0 0 24 24" fill="none"><path d="M5 19l1.1-3.3A7.5 7.5 0 1 1 9 18.5L5 19Z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/></svg>',
+  phone: '<svg viewBox="0 0 24 24" fill="none"><path d="M6.6 3.8h2.6l1.4 3.6-1.8 1.2a10 10 0 0 0 4.6 4.6l1.2-1.8 3.6 1.4v2.6a2 2 0 0 1-2.2 2A14.5 14.5 0 0 1 4.6 6a2 2 0 0 1 2-2.2Z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/></svg>',
+  edit: '<svg viewBox="0 0 24 24" fill="none"><path d="M4.5 19.5h4l10-10a2.1 2.1 0 0 0-3-3l-10 10v3Z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/></svg>',
+  plus: '<svg viewBox="0 0 24 24" fill="none" width="20" height="20"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>',
+  check: '<svg class="check" viewBox="0 0 24 24" fill="none"><path d="M5 12.5 10 17l9-10" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  search: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none"><circle cx="11" cy="11" r="6.5" stroke="currentColor" stroke-width="2"/><path d="m16 16 4 4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>'
+};
+
+// ======================= NAVIGASI =======================
+function login() {
+  role = $('loginId').value.toLowerCase().indexOf('supervisor') === 0 ? 'spv' : 'marketing';
+  $('vLogin').classList.add('hidden'); $('vApp').classList.remove('hidden'); $('tabbar').classList.remove('hidden');
+  tab = 'home'; render();
+}
+function tabsFor() {
+  return role === 'marketing'
+    ? [['home', 'Beranda', ICON.home], ['leads', 'Lead', ICON.leads], ['kpi', 'KPI Saya', ICON.kpi], ['more', 'Lainnya', ICON.more]]
+    : [['home', 'Beranda', ICON.home], ['leads', 'Lead', ICON.leads], ['kpi', 'KPI Tim', ICON.team], ['more', 'Lainnya', ICON.more]];
+}
+function go(t) { tab = t; render(); window.scrollTo({ top: 0 }); }
+function render() {
+  $('tabbar').innerHTML = tabsFor().map(([k, label, ic]) => '<button class="tab' + (k === tab ? ' on' : '') + '" onclick="go(\'' + k + '\')">' + ic + label + '</button>').join('');
+  const d = new Date();
+  $('topDate').textContent = d.toLocaleDateString('id-ID', { weekday: 'long', day: 'numeric', month: 'long' });
+  $('topAvatar').textContent = role === 'marketing' ? 'D' : 'S';
+  const titles = { home: role === 'marketing' ? 'Halo, ' + ME.short : 'Halo, SPV', leads: 'Lead', kpi: role === 'marketing' ? 'KPI Saya' : 'KPI Tim', more: 'Lainnya' };
+  $('topTitle').textContent = titles[tab];
+  $('screen').innerHTML = (role === 'marketing' ? { home: homeMk, leads: leadsScreen, kpi: kpiMk, more: moreScreen } : { home: homeSpv, leads: leadsScreen, kpi: kpiTeam, more: moreScreen })[tab]();
+}
+
+// ======================= KOMPONEN =======================
+function ring(value, size, stroke, color) {
+  const r = (size - stroke) / 2, c = 2 * Math.PI * r, v = Math.max(0, Math.min(1, value / 100));
+  return '<svg width="' + size + '" height="' + size + '" viewBox="0 0 ' + size + ' ' + size + '" style="transform:rotate(-90deg)">' +
+    '<circle cx="' + size / 2 + '" cy="' + size / 2 + '" r="' + r + '" fill="none" stroke="var(--fill2)" stroke-width="' + stroke + '"/>' +
+    '<circle cx="' + size / 2 + '" cy="' + size / 2 + '" r="' + r + '" fill="none" stroke="' + color + '" stroke-width="' + stroke + '" stroke-linecap="round" stroke-dasharray="' + (c * v) + ' ' + c + '"/></svg>';
+}
+function leadRow(l, hideDue) {
+  return '<button class="row ind" onclick="openLead(' + l.id + ')"><div class="avatar" style="background:' + COLORS[l.id % COLORS.length] + '">' + esc(initials(l.n)) + '</div>' +
+    '<div class="main"><div class="t">' + esc(l.n) + (l.hot ? ' <span class="pill p-red" style="margin-left:4px;padding:1px 7px">Hot</span>' : '') + '</div><div class="s">' + esc(l.p) + ' · ' + esc(l.s) + '</div></div>' +
+    (hideDue ? '' : '<span class="v tiny">' + esc(l.due) + '</span>') + chev + '</button>';
+}
+function pendingCard() {
+  return '<div class="card" style="margin-top:6px">' +
+    '<div class="hstack"><span class="pill p-blue"><i></i>Lead baru masuk</span><span class="spacer"></span><span class="tiny muted">Sisa waktu</span></div>' +
+    '<div class="hstack" style="margin-top:10px;align-items:flex-end"><div><div style="font-size:18px;font-weight:600">Atlantis Icon</div><div class="muted tiny" style="margin-top:2px">Sumber: Iklan Meta · Nama & nomor muncul setelah diterima</div></div>' +
+    '<span class="spacer"></span><span class="countdown" id="countdown">' + mmss(pendingSecs) + '</span></div>' +
+    '<button class="btn btn-primary" style="margin-top:14px" onclick="acceptLead()">Terima Lead</button></div>';
+}
+function mmss(s) { return String(Math.floor(s / 60)).padStart(2, '0') + ':' + String(s % 60).padStart(2, '0'); }
+
+// ======================= LAYAR MARKETING =======================
+function homeMk() {
+  const sc = score(), pace = 22 / 30 * 100, today = LEADS.filter((l) => l.due === 'Hari ini');
+  return (pendingSecs > 0 ? pendingCard() : '') +
+    '<div class="section-h"><h2>KPI November</h2><button class="link" onclick="go(\'kpi\')">Rincian</button></div>' +
+    '<button class="card" style="width:100%;text-align:left" onclick="go(\'kpi\')"><div class="hstack" style="gap:18px">' +
+      '<div class="ring-wrap">' + ring(sc, 132, 13, sc >= pace ? 'var(--green)' : 'var(--tint)') + '<div class="ring-num"><b>' + fmt(sc) + '</b><span>dari 100</span></div></div>' +
+      '<div style="flex:1"><div style="font-weight:600;font-size:16px">' + (sc >= pace ? 'Di atas jalur' : 'Sedikit di bawah jalur') + '</div>' +
+      '<div class="muted tiny" style="margin-top:4px;line-height:1.4">Hari ke-22 dari 30. Jalur hari ini ' + fmt(pace) + '.</div>' +
+      '<div class="muted tiny" style="margin-top:8px">1 closing menunggu verifikasi</div></div></div>' +
+      '<div class="stat3"><div><b>52</b><span>Database baru</span></div><div><b>168</b><span>Follow up</span></div><div><b>17</b><span>Hari lapor</span></div></div></button>' +
+    '<div class="section-h"><h2>Hari ini</h2><button class="link" onclick="go(\'leads\')">Semua lead</button></div>' +
+    '<div class="group">' + today.map((l) => leadRow(l, true)).join('') + '</div>' +
+    '<p class="foot">' + today.length + ' lead perlu dihubungi hari ini.</p>' +
+    '<div class="section-h"><h2>Aktivitas</h2></div>' +
+    '<div class="group">' +
+      '<button class="row" onclick="openSheet(\'report\')"><div class="main"><div class="t">Lapor Live TikTok / Canvasing</div><div class="s">Belum ada laporan hari ini</div></div>' + chev + '</button>' +
+      '<button class="row" onclick="openSheet(\'newLead\')"><div class="main"><div class="t">Tambah lead baru</div><div class="s">Input mandiri · masuk ke Database Baru</div></div>' + chev + '</button>' +
+    '</div>';
+}
+
+function leadsScreen() {
+  const segs = [['semua', 'Semua'], ['hari', 'Hari ini'], ['hot', 'Hot']];
+  const list = LEADS.filter((l) => leadSeg === 'semua' || (leadSeg === 'hari' && l.due === 'Hari ini') || (leadSeg === 'hot' && l.hot));
+  return '<div class="hstack" style="margin-top:2px"><div class="search" style="flex:1;margin-top:0">' + ICON.search + '<input placeholder="Cari nama atau nomor WA"></div>' +
+    (role === 'marketing' ? '<button class="icon-btn" style="background:var(--tint);color:#fff" onclick="openSheet(\'newLead\')" aria-label="Tambah lead">' + ICON.plus + '</button>' : '') + '</div>' +
+    '<div class="seg">' + segs.map(([k, l]) => '<button class="' + (leadSeg === k ? 'on' : '') + '" onclick="leadSeg=\'' + k + '\';render()">' + l + '</button>').join('') + '</div>' +
+    '<div class="group" style="margin-top:14px">' + (list.length ? list.map(leadRow).join('') : '<div class="row"><span class="muted">Tidak ada lead.</span></div>') + '</div>' +
+    '<p class="foot">' + list.length + ' lead · diurutkan dari jadwal follow-up terdekat</p>';
+}
+
+function kpiMk() {
+  const sc = score();
+  const segs = '<div class="seg" style="margin-top:2px"><button class="' + (kpiSeg === 'bulan' ? 'on' : '') + '" onclick="kpiSeg=\'bulan\';render()">Bulan ini</button><button class="' + (kpiSeg === 'tren' ? 'on' : '') + '" onclick="kpiSeg=\'tren\';render()">Tren 6 bulan</button></div>';
+  if (kpiSeg === 'tren') return segs + trendCard(sc);
+  return segs +
+    '<div class="card" style="margin-top:14px;display:flex;align-items:center;gap:18px"><div class="ring-wrap">' + ring(sc, 132, 13, 'var(--tint)') + '<div class="ring-num"><b>' + fmt(sc) + '</b><span>dari 100</span></div></div>' +
+    '<div><div style="font-weight:600">November 2026</div><div class="muted tiny" style="margin-top:4px;line-height:1.45">Jalur hari ini 73,3<br>Skor maksimal tiap indikator = bobotnya</div></div></div>' +
+    '<div class="section-h"><h2>Indikator</h2></div>' +
+    '<div class="group">' + KPI.map((x) => {
+      const pct = Math.min(x.a / x.t, 1);
+      return '<div class="row" style="flex-direction:column;align-items:stretch;gap:8px;padding:13px 16px">' +
+        '<div class="hstack"><div class="main"><div class="t" style="white-space:normal">' + esc(x.k) + '</div>' +
+        (x.pending ? '<div class="s" style="color:#A55E00">' + x.pending + ' menunggu verifikasi SPV</div>' : '<div class="s">Bobot ' + x.w + '%</div>') + '</div>' +
+        '<div style="text-align:right"><div style="font-weight:600;font-variant-numeric:tabular-nums">' + x.a + '<span class="muted" style="font-weight:400"> / ' + x.t + '</span></div><div class="s tiny muted">' + fmt(pct * x.w) + ' poin</div></div></div>' +
+        '<div class="bar"><i style="width:' + (pct * 100) + '%;background:' + (pct >= 1 ? 'var(--green)' : 'var(--tint)') + '"></i></div></div>';
+    }).join('') + '</div>' +
+    '<button class="btn btn-tinted" style="margin-top:16px" onclick="openSheet(\'report\')">Lapor Live TikTok / Canvasing</button>';
+}
+
+function trendCard(sc) {
+  const pts = TREND.map(([m, v], i) => [m, v == null ? sc : v, v == null]);
+  const W = 320, H = 150, L = 18, R = 300, T = 22, B = 118, step = (R - L) / (pts.length - 1);
+  const x = (i) => L + i * step, y = (v) => B - v / 100 * (B - T);
+  let g = '';
+  [0, 50, 100].forEach((v) => { g += '<line x1="' + L + '" x2="' + R + '" y1="' + y(v) + '" y2="' + y(v) + '" stroke="var(--fill2)" stroke-width="1"/>'; });
+  for (let i = 1; i < pts.length; i++) g += '<line x1="' + x(i - 1) + '" y1="' + y(pts[i - 1][1]) + '" x2="' + x(i) + '" y2="' + y(pts[i][1]) + '" stroke="var(--tint)" stroke-width="2.2" stroke-linecap="round"' + (pts[i][2] ? ' stroke-dasharray="4 4"' : '') + '/>';
+  pts.forEach((p, i) => {
+    g += '<circle cx="' + x(i) + '" cy="' + y(p[1]) + '" r="4.5" fill="' + (p[2] ? '#fff' : 'var(--tint)') + '" stroke="' + (p[2] ? 'var(--tint)' : '#fff') + '" stroke-width="2"/>';
+    g += '<text x="' + x(i) + '" y="' + (H - 10) + '" font-size="11" text-anchor="middle" fill="' + (p[2] ? 'var(--label)' : 'var(--label2)') + '" font-weight="' + (p[2] ? 600 : 400) + '">' + p[0] + '</text>';
+    if (i >= pts.length - 2) g += '<text x="' + (i === pts.length - 1 ? x(i) + 4 : x(i)) + '" y="' + (y(p[1]) - 10) + '" font-size="11.5" text-anchor="' + (i === pts.length - 1 ? 'end' : 'middle') + '" font-weight="600" fill="var(--label)">' + fmt(p[1]) + '</text>';
+  });
+  return '<div class="card" style="margin-top:14px"><div style="font-weight:600">Skor KPI</div><div class="muted tiny" style="margin-top:2px">Oktober 72,9 · naik 5,5 dari September</div>' +
+    '<svg viewBox="0 0 ' + W + ' ' + H + '" width="100%" style="margin-top:8px;display:block">' + g + '</svg>' +
+    '<div class="muted tiny">Titik berongga = November, masih berjalan.</div></div>' +
+    '<div class="group" style="margin-top:14px">' + TREND.slice().reverse().map(([m, v]) => '<div class="row"><div class="main"><div class="t">' + m + '</div></div><span class="v">' + (v == null ? fmt(sc) + ' (berjalan)' : fmt(v)) + '</span></div>').join('') + '</div>';
+}
+
+function moreScreen() {
+  return '<div class="group"><div class="row ind"><div class="avatar" style="background:var(--tint)">' + (role === 'marketing' ? 'DP' : 'S1') + '</div><div class="main"><div class="t">' + (role === 'marketing' ? ME.name : 'SPV 1') + '</div><div class="s">' + (role === 'marketing' ? 'Marketing · Grup A' : 'SPV / Manager') + '</div></div></div></div>' +
+    '<div class="section-h"><h2>Prototype</h2></div>' +
+    '<div class="group"><button class="row" onclick="switchRole()"><div class="main"><div class="t">Lihat sebagai ' + (role === 'marketing' ? 'SPV / Manager' : 'Marketing') + '</div><div class="s">Coba tampilan peran lain</div></div>' + chev + '</button></div>' +
+    '<div class="section-h"><h2>Pengaturan</h2></div>' +
+    '<div class="group">' +
+      '<div class="row"><div class="main"><div class="t">Notifikasi push</div></div><span class="pill p-green">Aktif</span></div>' +
+      '<button class="row" onclick="openSheet(\'notif\')"><div class="main"><div class="t">Riwayat notifikasi</div></div>' + chev + '</button>' +
+      '<div class="row"><div class="main"><div class="t">Versi</div></div><span class="v">Prototype</span></div>' +
+    '</div>' +
+    '<div class="group" style="margin-top:22px"><button class="row" onclick="logout()" style="justify-content:center"><span style="color:var(--red);font-weight:500">Keluar</span></button></div>';
+}
+
+// ======================= LAYAR SPV =======================
+function homeSpv() {
+  return '<div class="card"><div class="hstack"><div class="main"><div class="muted tiny">Rata-rata skor tim</div><div style="font-size:34px;font-weight:700;letter-spacing:-.02em;margin-top:2px">61,5</div></div>' +
+    '<div class="ring-wrap" style="width:84px;height:84px">' + ring(61.5, 84, 10, 'var(--tint)') + '</div></div>' +
+    '<div class="stat3"><div><b>3</b><span>Di bawah jalur</span></div><div><b>2</b><span>Perlu verifikasi</span></div><div><b>4</b><span>Kunjungan</span></div></div></div>' +
+    '<div class="section-h"><h2>Perlu tindakan</h2></div>' +
+    '<div class="group">' +
+      '<button class="row" onclick="openSheet(\'verify\')"><div class="main"><div class="t">Verifikasi closing</div><div class="s">2 closing menunggu persetujuan</div></div><span class="pill p-orange">2</span>' + chev + '</button>' +
+      '<button class="row" onclick="toast(\'Contoh: daftar lead belum diterima\')"><div class="main"><div class="t">Lead belum diterima</div><div class="s">1 lead · sisa 03.10</div></div><span class="pill p-blue">1</span>' + chev + '</button>' +
+    '</div>' +
+    '<div class="section-h"><h2>Aktivitas tim</h2><button class="link" onclick="go(\'kpi\')">KPI Tim</button></div>' +
+    '<div class="group">' + teamRows().slice(0, 4).map(([n], i) => '<div class="row ind"><div class="avatar" style="background:' + COLORS[i] + '">' + esc(initials(n)) + '</div><div class="main"><div class="t">' + esc(n) + '</div><div class="s">Terakhir update ' + ['10 menit', '35 menit', '2 jam', 'kemarin'][i] + ' lalu</div></div>' +
+      '<span class="pill ' + (i < 2 ? 'p-green' : i === 2 ? 'p-orange' : 'p-red') + '"><i></i>' + (i < 2 ? 'Aktif' : i === 2 ? 'Lambat' : 'Diam') + '</span></div>').join('') + '</div>';
+}
+
+function kpiTeam() {
+  return '<div class="seg" style="margin-top:2px"><button class="on">November</button><button onclick="toast(\'Contoh: pilih bulan lain\')">Oktober</button><button onclick="toast(\'Contoh: export PDF / Excel\')">Export</button></div>' +
+    '<button class="card" style="margin-top:14px;width:100%;text-align:left;display:flex;align-items:center;gap:12px" onclick="openSheet(\'verify\')"><span class="pill p-orange">2</span><div class="main"><div style="font-weight:600">Menunggu verifikasi</div><div class="muted tiny">Closing baru dihitung setelah disetujui</div></div>' + chev + '</button>' +
+    '<div class="section-h"><h2>Peringkat</h2><span class="muted tiny">Jalur hari ini 73,3</span></div>' +
+    '<div class="group">' + teamRows().map(([n, s], i) => '<button class="row ind" onclick="toast(\'Contoh: rincian KPI ' + esc(n) + '\')"><div class="avatar" style="background:' + COLORS[i] + '">' + esc(initials(n)) + '</div>' +
+      '<div class="main"><div class="hstack"><div class="t" style="flex:1">' + (i + 1) + '. ' + esc(n) + '</div><b style="font-variant-numeric:tabular-nums">' + fmt(s) + '</b></div>' +
+      '<div class="bar" style="margin-top:8px"><i style="width:' + s + '%;background:' + (s >= 73.3 ? 'var(--green)' : 'var(--tint)') + '"></i></div></div>' + chev + '</button>').join('') + '</div>' +
+    '<p class="foot">Hijau = sudah di atas jalur hari ini.</p>';
+}
+
+// ======================= SHEET =======================
+let sheetLead = null;
+function openSheet(kind, arg) {
+  const body = {
+    notif: notifSheet, report: reportSheet, newLead: newLeadSheet, verify: verifySheet,
+    lead: () => leadSheet(arg), update: () => updateSheet(arg)
+  }[kind]();
+  $('sheetBody').innerHTML = body;
+  $('sheet').scrollTop = 0;
+  $('scrim').classList.add('on'); $('sheet').classList.add('on');
+}
+function closeSheet() { $('scrim').classList.remove('on'); $('sheet').classList.remove('on'); }
+function head(title, right) {
+  return '<div class="sheet-head"><button class="btn-plain btn" onclick="closeSheet()">Tutup</button><h3>' + title + '</h3>' + (right || '<span style="width:52px"></span>') + '</div>';
+}
+function openLead(id) { openSheet('lead', id); }
+
+function leadSheet(id) {
+  const l = LEADS.find((x) => x.id === id); sheetLead = l;
+  return head('Detail Lead') +
+    '<div style="text-align:center;padding:4px 0 2px"><div class="avatar" style="width:64px;height:64px;font-size:22px;margin:0 auto;background:' + COLORS[l.id % COLORS.length] + '">' + esc(initials(l.n)) + '</div>' +
+    '<div style="font-size:22px;font-weight:700;margin-top:10px;letter-spacing:-.01em">' + esc(l.n) + '</div><div class="muted" style="margin-top:2px;font-size:15px">' + esc(l.p) + '</div>' +
+    '<div style="margin-top:8px">' + pill(l.s) + '</div></div>' +
+    '<div class="actions"><button onclick="toast(\'Membuka WhatsApp…\')">' + ICON.wa + 'WhatsApp</button><button onclick="toast(\'Menelepon…\')">' + ICON.phone + 'Telepon</button><button onclick="openSheet(\'update\',' + l.id + ')">' + ICON.edit + 'Update</button></div>' +
+    '<div class="group" style="margin-top:10px">' +
+      '<div class="row"><div class="main"><div class="s" style="margin:0">Nomor WhatsApp</div><div class="t" style="margin-top:2px">' + esc(l.wa) + '</div></div></div>' +
+      '<div class="row"><div class="main"><div class="s" style="margin:0">Sumber</div><div class="t" style="margin-top:2px">' + esc(l.src) + '</div></div></div>' +
+      '<div class="row"><div class="main"><div class="s" style="margin:0">Follow-up berikutnya</div><div class="t" style="margin-top:2px">' + esc(l.due) + '</div></div></div>' +
+      (l.visit ? '<div class="row"><div class="main"><div class="s" style="margin:0">Janji kunjungan</div><div class="t" style="margin-top:2px">' + esc(l.visit) + '</div></div></div>' : '') +
+    '</div>' +
+    '<div class="section-h"><h2>Riwayat</h2></div>' +
+    '<div class="card"><div class="timeline">' +
+      '<div class="tl now"><div style="font-weight:600;font-size:15px">' + esc(l.s) + '</div><div class="muted tiny" style="margin-top:2px">Hari ini, 09.14 · Sudah kirim brosur & pricelist, minta simulasi KPR.</div></div>' +
+      '<div class="tl"><div style="font-weight:600;font-size:15px">Awal Chat</div><div class="muted tiny" style="margin-top:2px">19 Nov, 15.40 · Tertarik tipe 45, budget sekitar 600 juta.</div></div>' +
+      '<div class="tl" style="padding-bottom:0"><div style="font-weight:600;font-size:15px">Lead masuk</div><div class="muted tiny" style="margin-top:2px">18 Nov, 10.02 · ' + esc(l.src) + '</div></div>' +
+    '</div></div>';
+}
+
+const STATUS_LIST = ['Awal Chat', 'Follow-Up 1', 'Follow-Up 2', 'Follow-Up 3', 'Site Visit', 'Closing ITJ', 'Closing SPPR', 'Lost (Batal)'];
+let updStatus = null;
+function updateSheet(id) {
+  const l = LEADS.find((x) => x.id === id); sheetLead = l; if (!updStatus) updStatus = l.s;
+  const closing = updStatus === 'Closing ITJ' || updStatus === 'Closing SPPR';
+  return head('Update Status', '<button class="btn btn-plain" style="font-weight:600" onclick="saveUpdate()">Simpan</button>') +
+    '<div class="muted tiny" style="margin:0 4px 8px">' + esc(l.n) + ' · ' + esc(l.p) + '</div>' +
+    '<div class="group">' + STATUS_LIST.map((s) => '<button class="row" onclick="updStatus=\'' + s + '\';openSheet(\'update\',' + l.id + ')"><div class="main"><div class="t" style="font-weight:400">' + s + '</div></div>' + (s === updStatus ? ICON.check : '') + '</button>').join('') + '</div>' +
+    (closing ? '<div class="section-h"><h2 style="font-size:17px">Data closing</h2></div>' +
+      '<div class="field"><label>Proyek</label><select><option>' + esc(l.p) + '</option><option>Atlantis Hills</option></select></div>' +
+      '<div class="hstack" style="margin-top:10px;gap:10px"><div class="field" style="flex:1;margin:0"><label>Unit / Blok</label><input placeholder="C-12"></div><div class="field" style="flex:1;margin:0"><label>Nominal (Rp)</label><input inputmode="numeric" placeholder="5.000.000" oninput="this.value=this.value.replace(/\\D/g,\'\').replace(/\\B(?=(\\d{3})+(?!\\d))/g,\'.\')"></div></div>' +
+      '<p class="foot">SPV akan memverifikasi sebelum closing dihitung di KPI.</p>' : '') +
+    '<div class="section-h"><h2 style="font-size:17px">Catatan</h2></div>' +
+    '<div class="field"><label>Catatan update (wajib)</label><textarea placeholder="Contoh: sudah kirim simulasi KPR, buyer minta survey Sabtu"></textarea></div>' +
+    '<div class="field"><label>Follow-up berikutnya</label><input type="date"></div>' +
+    '<div class="field"><label>Janji kunjungan (opsional)</label><input type="datetime-local"></div>';
+}
+function saveUpdate() { if (sheetLead && updStatus) sheetLead.s = updStatus; updStatus = null; closeSheet(); toast('Status tersimpan'); render(); }
+
+let repType = 'live';
+function reportSheet() {
+  return head('Lapor Aktivitas', '<button class="btn btn-plain" style="font-weight:600" onclick="closeSheet();toast(\'Laporan tersimpan\')">Kirim</button>') +
+    '<div class="seg" style="margin-top:0"><button class="' + (repType === 'live' ? 'on' : '') + '" onclick="repType=\'live\';openSheet(\'report\')">Live TikTok</button><button class="' + (repType === 'canvas' ? 'on' : '') + '" onclick="repType=\'canvas\';openSheet(\'report\')">Canvasing</button></div>' +
+    '<div style="margin-top:14px">' +
+    '<div class="field"><label>Tanggal</label><input type="date" value="' + new Date().toISOString().slice(0, 10) + '"></div>' +
+    (repType === 'live'
+      ? '<div class="field"><label>Link video Live TikTok</label><input placeholder="https://www.tiktok.com/@…"></div>'
+      : '<div class="field"><label>Lokasi canvasing</label><input placeholder="Perum Griya Asri Blok C"></div>' +
+        '<div class="field"><label>Izin dari</label><input placeholder="Pak Budi, Ketua RT 05"></div>' +
+        '<div class="hstack" style="margin-top:10px;gap:10px"><div class="field" style="flex:1;margin:0"><label>Lapor di grup</label><input placeholder="Grup Marketing PRN"></div><div class="field" style="width:120px;margin:0"><label>Jam</label><input type="time" value="14:30"></div></div>') +
+    '<div class="field"><label>Keterangan (opsional)</label><input placeholder="Live 2 jam, 35 penonton"></div></div>' +
+    '<p class="foot">Satu laporan per hari dihitung untuk KPI Online/Offline.</p>';
+}
+
+function newLeadSheet() {
+  return head('Lead Baru', '<button class="btn btn-plain" style="font-weight:600" onclick="closeSheet();toast(\'Lead tersimpan\')">Simpan</button>') +
+    '<div class="field"><label>Nama buyer</label><input placeholder="Rina Kartika"></div>' +
+    '<div class="field"><label>Nomor WhatsApp</label><input inputmode="tel" placeholder="0812…"></div>' +
+    '<div class="field"><label>Proyek</label><select><option>Atlantis Icon</option><option>Atlantis Hills</option><option>Permata Tunggulwulung</option><option>Aya Sophia Residence</option><option>Atlantis Green City</option></select></div>' +
+    '<div class="field"><label>Sumber</label><select><option>Expo</option><option>Live TikTok</option><option>Media Sosial (IG/FB)</option><option>Referral / Relasi</option><option>WhatsApp Masuk</option><option>Walk-in / Datang Langsung</option></select></div>' +
+    '<div class="field"><label>Catatan awal (opsional)</label><textarea placeholder="Ketemu di booth expo, tertarik tipe 45"></textarea></div>' +
+    '<p class="foot">Nomor dicek otomatis ke seluruh tim supaya tidak dobel.</p>';
+}
+
+function notifSheet() {
+  const dot = { blue: 'var(--tint)', green: 'var(--green)', orange: 'var(--orange)', gray: 'var(--label3)' };
+  return head('Notifikasi') + '<div class="group">' + NOTIF.map(([t, s, w, c]) =>
+    '<div class="row" style="align-items:flex-start"><span style="width:8px;height:8px;border-radius:50%;background:' + dot[c] + ';margin-top:7px;flex:none"></span>' +
+    '<div class="main"><div class="hstack"><div class="t" style="flex:1;font-size:15.5px">' + esc(t) + '</div><span class="tiny muted">' + esc(w) + '</span></div><div class="s" style="white-space:normal;line-height:1.35">' + esc(s) + '</div></div></div>').join('') +
+    '</div><p class="foot">5 notifikasi terakhir.</p>';
+}
+
+const VERIFY = [
+  { n: 'Bapak Fajar Nugroho', mk: 'Dimas Pratama', st: 'Closing SPPR', p: 'Atlantis Icon', u: 'C-12', rp: '1.250.000.000' },
+  { n: 'Ibu Wina Kusuma', mk: 'Sinta Maharani', st: 'Closing ITJ', p: 'Atlantis Hills', u: 'B-7', rp: '5.000.000' }
+];
+function verifySheet() {
+  return head('Verifikasi Closing') + (VERIFY.length ? VERIFY.map((v, i) =>
+    '<div class="card" style="margin-bottom:10px"><div class="hstack"><span class="pill p-green">' + esc(v.st) + '</span><span class="spacer"></span><span class="tiny muted">' + esc(v.mk) + '</span></div>' +
+    '<div style="font-size:17px;font-weight:600;margin-top:10px">' + esc(v.n) + '</div><div class="muted tiny" style="margin-top:3px">' + esc(v.p) + ' · Unit ' + esc(v.u) + ' · Rp ' + esc(v.rp) + '</div>' +
+    '<div class="hstack" style="margin-top:14px;gap:10px"><button class="btn btn-tinted" style="height:42px;color:var(--red);background:var(--red-soft)" onclick="decide(' + i + ',false)">Tolak</button><button class="btn btn-primary" style="height:42px" onclick="decide(' + i + ',true)">Setujui</button></div></div>').join('')
+    : '<div class="card muted" style="text-align:center">Tidak ada closing yang menunggu.</div>');
+}
+function decide(i, ok) { const v = VERIFY.splice(i, 1)[0]; toast((ok ? 'Disetujui: ' : 'Ditolak: ') + v.n); openSheet('verify'); }
+
+// ======================= LAIN-LAIN =======================
+let toastT;
+function toast(msg) { $('toast').textContent = msg; $('toast').classList.add('on'); clearTimeout(toastT); toastT = setTimeout(() => $('toast').classList.remove('on'), 1800); }
+function acceptLead() { pendingSecs = 0; toast('Lead diterima'); render(); }
+function switchRole() { role = role === 'marketing' ? 'spv' : 'marketing'; tab = 'home'; render(); }
+function logout() { $('vApp').classList.add('hidden'); $('tabbar').classList.add('hidden'); $('vLogin').classList.remove('hidden'); }
+setInterval(() => { if (pendingSecs > 0) { pendingSecs--; const el = $('countdown'); if (el) el.textContent = mmss(pendingSecs); } }, 1000);
+</script>
+</body>
+</html>
