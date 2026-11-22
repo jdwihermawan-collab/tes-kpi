@@ -745,8 +745,9 @@ function homeMk() {
       (pend ? '<div class="tiny" style="margin-top:8px;color:#A55E00">' + pend + ' closing menunggu verifikasi</div>' : '') + '</div></div>' +
       '<div class="stat3"><div><b class="num">' + r.counts.dbBaru + '</b><span>Database baru</span></div><div><b class="num">' + r.counts.followUp + '</b><span>Follow up</span></div><div><b class="num">' + r.counts.online + '</b><span>Hari lapor</span></div></div></button>';
   }
-  return pushCard() + pendingCards() + todaySection() +
+  return pendingCards() +
     '<div class="section-h"><h2>KPI ' + KPI_MONTH_NAMES[new Date().getMonth()] + '</h2><button class="link" onclick="go(\'kpi\')">Rincian</button></div>' + kpiCard +
+    todaySection() + pushCard().replace('margin-top:6px', 'margin-top:22px') +
     '<div class="section-h"><h2>Perlu dihubungi</h2><button class="link" onclick="leadSeg=\'todo\';go(\'leads\')">Semua</button></div>' +
     (due.length ? '<div class="group">' + due.slice(0, 6).map(function (l) { return leadRow(l); }).join('') + '</div><p class="foot">' + due.length + ' lead baru / jatuh tempo follow-up.</p>'
       : '<div class="card empty">Tidak ada yang jatuh tempo. Mantap!</div>') +
