@@ -253,6 +253,7 @@ function initials(n) {
   return ((w[0] || '?')[0] + (w[1] ? w[1][0] : '')).toUpperCase();
 }
 function leadsPool() { return role === 'marketing' ? marketingLeadsData.concat(marketingPendingLeads) : allLeadsData; }
+function isTeamRole() { return role === 'staff' || role === 'cs'; }   // CS & SPV/Admin: memuat semua lead
 function isClosed(l) { return CLOSED_STATUSES.indexOf(l.status) !== -1; }
 
 const ICON = {
@@ -331,7 +332,7 @@ function showView(v) {
   $('vBoot').classList.toggle('hidden', v !== 'boot');
   $('vLogin').classList.toggle('hidden', v !== 'login');
   $('vApp').classList.toggle('hidden', v !== 'app');
-  $('tabbar').classList.toggle('hidden', v !== 'app' || role === 'cs');
+  $('tabbar').classList.toggle('hidden', v !== 'app');
 }
 
 auth.onAuthStateChanged(function (user) {
@@ -369,16 +370,16 @@ function startSession() {
     logMarketingLogin();
     startMarketingLeads();
     loadMyKpi(false);
-  } else if (role === 'staff') {
+  } else if (isTeamRole()) {
     unsubs.push(db.collection('users').onSnapshot(function (s) {
       usersData = s.docs.map(function (d) { return Object.assign({ uid: d.id }, d.data()); });
-      if (!teamKpi) loadTeamKpi(false);
+      if (role === 'staff' && !teamKpi) loadTeamKpi(false);
       rerender();
     }, function (err) { console.error(err); }));
     unsubs.push(db.collection('settings').doc('adRotation').onSnapshot(function (s) {
       adRotation = s.exists ? { counter: Number(s.data().counter) || 0, queue: Array.isArray(s.data().queue) ? s.data().queue : null } : { counter: null, queue: null };
     }, function () {}));
-    unsubs.push(db.collection('marketingActivity').onSnapshot(function (s) {
+    if (role === 'staff') unsubs.push(db.collection('marketingActivity').onSnapshot(function (s) {
       const m = {};
       s.docs.forEach(function (d) { const x = d.data({ serverTimestamps: 'estimate' }); if (x.name) m[String(x.name).trim().toLowerCase()] = x; });
       marketingActivityData = m; rerender();
@@ -398,6 +399,7 @@ function stopAll() {
   Object.keys(trendCache).forEach(function (k) { delete trendCache[k]; });
   kpiReportsCache = {};
   resetNotifState('marketing'); resetNotifState('csAdmin');
+  csSuccess = null; csForm = {};
   closeSheet();
 }
 
@@ -451,7 +453,7 @@ function startStaffLeads() {
 
 // Lead belum diterima yang lewat batas: dialihkan otomatis (sama dengan panel lama; cron juga melakukannya).
 function reassignPendingLead(leadId, force) {
-  if (!currentUser || role !== 'staff' || reassignInFlight.has(leadId)) return Promise.resolve();
+  if (!currentUser || !isTeamRole() || reassignInFlight.has(leadId)) return Promise.resolve();
   if (force && !confirm('Alihkan lead ini ke marketing berikutnya sekarang?')) return Promise.resolve();
   reassignInFlight.add(leadId);
   const ref = db.collection('leads').doc(leadId);
@@ -502,7 +504,7 @@ setInterval(function () {
     else if (el.getAttribute('data-late') !== '1') crossed = true;
   });
   if (crossed) rerender();
-  if (role === 'staff') {
+  if (isTeamRole()) {
     allLeadsData.forEach(function (l) {
       if (isPendingAccept(l) && !l.acceptExhausted && acceptDeadlineMs(l) && acceptDeadlineMs(l) <= now) reassignPendingLead(l.id, false);
     });
@@ -555,7 +557,7 @@ function loadTeamKpi(force) {
 }
 function afterKpiChange() { // aksi yang mengubah KPI: muat ulang data bulan ini
   Object.keys(kpiCacheV2).forEach(function (k) { delete kpiCacheV2[k]; });
-  if (role === 'marketing') loadMyKpi(true); else loadTeamKpi(true);
+  if (role === 'marketing') loadMyKpi(true); else if (role === 'staff') loadTeamKpi(true);
 }
 function rowScore(r) { return kpiScore(r.counts, kpiItems()); }
 // Predikat penilaian kinerja (sama dengan tabel KPI lama): >= 75 Above, 60–75 Perform, < 60 Not Perform.
@@ -601,7 +603,7 @@ function dueLabel(l) {
 }
 function leadRow(l, opts) {
   opts = opts || {};
-  const sub = (role === 'staff' && !opts.noOwner ? (l.assignedTo || '-') + ' · ' : '') + (l.project || '-') + ' · ' + (l.status || '-');
+  const sub = (isTeamRole() && !opts.noOwner ? (l.assignedTo || '-') + ' · ' : '') + (l.project || '-') + ' · ' + (l.status || '-');
   return '<button class="row ind" onclick="openSheet(\'lead\',\'' + esc(l.id) + '\')"><div class="avatar" style="background:' + colorFor(l.id) + '">' + esc(initials(l.buyerName)) + '</div>' +
     '<div class="main"><div class="t">' + esc(l.buyerName || '-') + (l.isHot ? ' <span class="pill p-red" style="margin-left:4px;padding:1px 7px">Hot</span>' : '') + '</div><div class="s">' + esc(sub) + '</div></div>' +
     (opts.noDue ? '' : dueLabel(l)) + chev + '</button>';
@@ -635,6 +637,7 @@ function pushCard() {
 // =====================================================================
 function tabsFor() {
   if (role === 'marketing') return [['home', 'Beranda', ICON.home], ['leads', 'Lead', ICON.leads], ['kpi', 'KPI Saya', ICON.kpi], ['more', 'Lainnya', ICON.more]];
+  if (role === 'cs') return [['home', 'Input', ICON.plus], ['leads', 'Lead', ICON.leads], ['more', 'Lainnya', ICON.more]];
   return [['home', 'Beranda', ICON.home], ['leads', 'Lead', ICON.leads], ['kpi', 'KPI Tim', ICON.kpi], ['more', 'Lainnya', ICON.more]];
 }
 function go(t) {
@@ -654,16 +657,15 @@ function doRender() {
   updateBell();
   $('topDate').textContent = new Date().toLocaleDateString('id-ID', { weekday: 'long', day: 'numeric', month: 'long' });
   $('topAvatar').textContent = initials(currentUser.name);
-  if (role === 'cs') { $('topTitle').textContent = 'Halo, ' + currentUser.name.split(' ')[0]; $('screen').innerHTML = csScreen(); return; }
-  const pend = role === 'marketing' ? marketingPendingLeads.length : 0;
+  const pend = role === 'marketing' ? marketingPendingLeads.length : role === 'cs' ? allLeadsData.filter(isPendingAccept).length : 0;
   $('tabbar').innerHTML = tabsFor().map(function (t) {
     return '<button class="tab' + (t[0] === tab ? ' on' : '') + '" onclick="go(\'' + t[0] + '\')">' + t[2] + t[1] + (t[0] === 'home' && pend ? '<span class="badge">' + pend + '</span>' : '') + '</button>';
   }).join('');
-  const titles = { home: 'Halo, ' + currentUser.name.split(' ')[0], leads: 'Lead', kpi: role === 'marketing' ? 'KPI Saya' : 'KPI Tim', more: 'Lainnya' };
+  const titles = { home: role === 'cs' ? 'Input Lead' : 'Halo, ' + currentUser.name.split(' ')[0], leads: 'Lead', kpi: role === 'marketing' ? 'KPI Saya' : 'KPI Tim', more: 'Lainnya' };
   $('topTitle').textContent = titles[tab];
   // Pertahankan fokus & posisi kursor kolom pencarian saat daftar diperbarui.
   const active = document.activeElement && document.activeElement.id === 'leadSearch' ? document.activeElement.selectionStart : null;
-  const scr = role === 'marketing' ? { home: homeMk, leads: leadsScreen, kpi: kpiMkScreen, more: moreScreen } : { home: homeStaff, leads: leadsScreen, kpi: kpiTeamScreen, more: moreScreen };
+  const scr = role === 'marketing' ? { home: homeMk, leads: leadsScreen, kpi: kpiMkScreen, more: moreScreen } : role === 'cs' ? { home: csScreen, leads: leadsScreen, more: moreScreen } : { home: homeStaff, leads: leadsScreen, kpi: kpiTeamScreen, more: moreScreen };
   $('screen').innerHTML = scr[tab]();
   if (active !== null && $('leadSearch')) { $('leadSearch').focus(); try { $('leadSearch').setSelectionRange(active, active); } catch (e) {} }
 }
@@ -764,7 +766,7 @@ function homeMk() {
 // ---------- Lead (marketing & staff) ----------
 function leadsScreen() {
   const segs = [['todo', 'Perlu tindak'], ['all', 'Semua'], ['hot', 'Hot'], ['done', 'Selesai']];
-  const mkOpts = role === 'staff' ? '<select class="select-chip" style="margin-top:10px" onchange="leadMk=this.value;rerender()"><option value="">Semua marketing</option>' +
+  const mkOpts = isTeamRole() ? '<select class="select-chip" style="margin-top:10px" onchange="leadMk=this.value;rerender()"><option value="">Semua marketing</option>' +
     activeMarketingUsers().map(function (u) { return '<option' + (u.name === leadMk ? ' selected' : '') + '>' + esc(u.name) + '</option>'; }).join('') + '</select>' : '';
   return '<div class="hstack" style="margin-top:2px"><div class="search">' + ICON.search + '<input id="leadSearch" placeholder="Cari nama atau nomor WA" value="' + esc(leadQuery) + '" oninput="leadQuery=this.value;rerender()"></div>' +
     (role === 'marketing' ? '<button class="icon-btn" style="background:var(--tint);color:#fff" onclick="openSheet(\'newLead\')" aria-label="Tambah lead">' + ICON.plus + '</button>' : '') + '</div>' +
@@ -777,7 +779,7 @@ function filteredLeads() {
   const qd = q.replace(/\D/g, '');
   return leadsPool().filter(function (l) {
     if (role === 'marketing' && isPendingAccept(l)) return false;
-    if (role === 'staff' && leadMk && l.assignedTo !== leadMk) return false;
+    if (isTeamRole() && leadMk && l.assignedTo !== leadMk) return false;
     if (leadSeg === 'todo' && !(needsAttentionNow(l) || isPendingAccept(l))) return false;
     if (leadSeg === 'hot' && (!l.isHot || isClosed(l))) return false;
     if (leadSeg === 'done' && !isClosed(l)) return false;
@@ -947,12 +949,7 @@ function homeStaff() {
       '<div class="ring-wrap" style="width:84px;height:84px">' + ring(avg, 84, 10, avg >= pace ? 'var(--green)' : 'var(--tint)') + '</div></div>' +
       '<div class="stat3"><button onclick="go(\'kpi\')"><b>' + below + '</b><span>Di bawah jalur</span></button><button onclick="openSheet(\'verify\')"><b>' + pendV + '</b><span>Perlu verifikasi</span></button><button onclick="openSheet(\'visits\')"><b>' + visits.length + '</b><span>Kunjungan hari ini</span></button></div></div>';
   }
-  const pendHtml = pending.length ? '<div class="section-h"><h2>Belum diterima</h2></div><div class="group">' + pending.map(function (l) {
-    const dl = acceptDeadlineMs(l), late = dl <= Date.now();
-    return '<div class="row"><div class="main"><div class="t">' + esc(l.project || '-') + ' · ' + esc(l.assignedTo || '-') + '</div><div class="s">' + esc(l.adSource || '-') + ((l.passedFrom || []).length ? ' · dilewati ' + esc(l.passedFrom.join(', ')) : '') + (l.acceptExhausted ? ' · semua marketing terlewati' : '') + '</div></div>' +
-      '<span class="num" style="font-weight:600;color:' + (late ? 'var(--red)' : 'var(--label)') + '" data-deadline="' + dl + '" data-late="' + (late ? 1 : 0) + '">' + (late ? '00:00' : formatCountdown(dl - Date.now())) + '</span>' +
-      '<button class="btn-plain tiny" onclick="reassignPendingLead(\'' + esc(l.id) + '\', true)">Alihkan</button></div>';
-  }).join('') + '</div>' : '';
+  const pendHtml = pendingAcceptHtml(pending);
   const mk = activeMarketingUsers();
   const team = mk.map(function (u) {
     const act = marketingActivityData[String(u.name).trim().toLowerCase()];
@@ -993,10 +990,163 @@ function kpiTeamScreen() {
 function kpiIsMarketingData() { return kpiData && kpiData.rows.length === 1 && role === 'staff' && kpiData.rows[0].uid === currentUser.uid; }
 
 // ---------- CS ----------
+// Lead menunggu "Terima" (dipakai beranda SPV & Panel CS).
+function pendingAcceptHtml(pending) {
+  if (!pending.length) return '';
+  return '<div class="section-h"><h2>Belum diterima</h2></div><div class="group">' + pending.map(function (l) {
+    const dl = acceptDeadlineMs(l), late = dl <= Date.now();
+    return '<div class="row" style="flex-wrap:wrap"><div class="main"><div class="t">' + esc(l.project || '-') + ' · ' + esc(l.assignedTo || '-') + '</div><div class="s">' + esc(l.adSource || '-') + ((l.passedFrom || []).length ? ' · dilewati ' + esc(l.passedFrom.join(', ')) : '') + (l.acceptExhausted ? ' · semua marketing terlewati' : '') + '</div></div>' +
+      '<span class="num" style="font-weight:600;color:' + (late ? 'var(--red)' : 'var(--label)') + '" data-deadline="' + dl + '" data-late="' + (late ? 1 : 0) + '">' + (late ? '00:00' : formatCountdown(dl - Date.now())) + '</span>' +
+      '<button class="btn-plain tiny" onclick="csNotifyWa(\'' + esc(l.id) + '\')">WA</button>' +
+      '<button class="btn-plain tiny" onclick="reassignPendingLead(\'' + esc(l.id) + '\', true)">Alihkan</button></div>';
+  }).join('') + '</div><p class="foot">Lewat 5 menit, lead otomatis dialihkan dan notif terkirim ke HP marketing berikutnya. Tombol WA hanya cadangan kalau marketing belum mengaktifkan notifikasi.</p>';
+}
+let csMode = 'umum';          // 'umum' | 'iklan' | 'spam'
+let csForm = {};              // isian form (dipertahankan saat layar di-render ulang)
+let csSuccess = null;         // lead yang baru disimpan (kartu sukses)
+function csRotationList() { return activeMarketingUsers().filter(function (u) { return u.inRotation !== false; }).map(function (u) { return u.name; }); }
+function csNextRotation() {
+  const list = csRotationList();
+  if (!list.length) return '';
+  const counter = adRotation.counter !== null ? adRotation.counter : allLeadsData.filter(function (l) { return l.isAdLead === true; }).length;
+  return normalizeRotationQueue(adRotation.queue, list, counter)[0] || '';
+}
+function csCapture() {
+  ['csName', 'csWa', 'csSource', 'csProject', 'csNote', 'csAssign'].forEach(function (id) { if ($(id)) csForm[id] = $(id).value; });
+}
+function csSetMode(m) { csCapture(); csMode = m; rerender(); }
+function csOpt(list, sel, placeholder) {
+  return '<option value=""' + (sel ? '' : ' selected') + ' disabled>' + placeholder + '</option>' + list.map(function (x) {
+    return '<option value="' + esc(x) + '"' + (x === sel ? ' selected' : '') + '>' + esc(x) + '</option>';
+  }).join('');
+}
 function csScreen() {
-  return '<div class="card" style="margin-top:8px"><div style="font-weight:600">Panel CS ada di tampilan lama</div><div class="muted small" style="margin-top:6px;line-height:1.45">Input lead (umum, iklan, spam), rotasi, dan riwayat input masih memakai tampilan lama yang lebih nyaman di laptop.</div>' +
-    '<a class="btn btn-primary" style="margin-top:14px" href="/">Buka Panel CS</a></div>' +
-    '<div class="group" style="margin-top:22px"><button class="row" onclick="logout()" style="justify-content:center"><span style="color:var(--red);font-weight:500">Keluar</span></button></div>';
+  const pending = allLeadsData.filter(isPendingAccept).sort(function (a, b) { return acceptDeadlineMs(a) - acceptDeadlineMs(b); });
+  const f = csForm, mk = activeMarketingUsers().map(function (u) { return u.name; });
+  let body;
+  if (csSuccess) {
+    const s = csSuccess;
+    body = '<div class="card" style="margin-top:12px"><div class="hstack" style="gap:12px"><div class="avatar" style="background:var(--green)">' + ICON.check.replace('class="check"', 'class="check" style="color:#fff"') + '</div>' +
+      '<div class="main"><div style="font-weight:600;font-size:16px">Lead berhasil disimpan</div><div class="muted tiny">Marketing wajib menekan Terima dalam 5 menit.</div></div></div>' +
+      '<div class="group" style="margin-top:12px;background:var(--fill)">' +
+      '<div class="row"><div class="main"><div class="s">Nama buyer</div><div class="t">' + esc(s.buyerName) + '</div></div></div>' +
+      '<div class="row"><div class="main"><div class="s">Proyek</div><div class="t">' + esc(s.project) + '</div></div></div>' +
+      '<div class="row"><div class="main"><div class="s">Marketing bertugas</div><div class="t">' + esc(s.assignedTo) + '</div></div></div>' +
+      (s.csNote ? '<div class="row"><div class="main"><div class="s">Catatan untuk marketing</div><div class="t wrap">' + esc(s.csNote) + '</div></div></div>' : '') + '</div>' +
+      '<button class="btn btn-green" style="margin-top:14px" onclick="csNotifyWa(\'' + esc(s.id) + '\')">' + ICON.wa.replace('<svg', '<svg width="20" height="20"') + 'Beritahu ke WA</button>' +
+      '<button class="btn btn-tinted" style="margin-top:10px" onclick="csSuccess=null;rerender()">Input lead baru lagi</button></div>';
+  } else if (csMode === 'spam') {
+    body = '<p class="foot" style="margin-top:12px">Catat nomor dari iklan yang ternyata spam (salah sambung, bot, iseng). Tidak dikirim ke marketing dan tidak memengaruhi rotasi.</p>' +
+      '<label class="field"><span>Nomor WhatsApp</span><input id="csWa" type="tel" inputmode="tel" value="' + esc(f.csWa || '') + '" placeholder="0812xxxxxxx"></label>' +
+      '<label class="field"><span>Proyek</span><select id="csProject">' + csOpt(projectList, f.csProject, 'Pilih proyek') + '</select></label>' +
+      '<p class="err hidden" id="csErr"></p><button class="btn btn-primary" style="margin-top:16px" id="csSave" onclick="csSaveSpam()">Simpan Spam</button>';
+  } else {
+    const next = csMode === 'iklan' ? csNextRotation() : '';
+    body = '<div style="margin-top:12px"><label class="field"><span>Nama calon buyer</span><input id="csName" value="' + esc(f.csName || '') + '" placeholder="Rina Kartika"></label>' +
+      '<label class="field"><span>Nomor WhatsApp</span><input id="csWa" type="tel" inputmode="tel" value="' + esc(f.csWa || '') + '" placeholder="0812xxxxxxx"></label>' +
+      '<label class="field"><span>Sumber iklan</span><input id="csSource" value="' + esc(f.csSource || '') + '" placeholder="Meta Ads, Pameran, Relasi, Brosur"></label>' +
+      '<label class="field"><span>Proyek yang diminati</span><select id="csProject">' + csOpt(projectList, f.csProject, 'Pilih proyek') + '</select></label>' +
+      '<label class="field"><span>Catatan untuk marketing (opsional)</span><textarea id="csNote" rows="2" placeholder="Minta dihubungi sore jam 4">' + esc(f.csNote || '') + '</textarea></label>' +
+      (csMode === 'umum' ? '<label class="field"><span>Tugaskan ke marketing</span><select id="csAssign">' + csOpt(mk, f.csAssign, mk.length ? 'Pilih marketing' : 'Belum ada marketing aktif') + '</select></label>'
+        : '<div class="card" style="margin-top:10px;padding:12px 16px"><div class="muted tiny">Penugasan otomatis (rotasi bergiliran)</div><div style="font-weight:600;margin-top:2px">Giliran berikutnya: ' + esc(next || '(belum ada marketing di rotasi)') + '</div></div>') +
+      '<p class="err hidden" id="csErr"></p><button class="btn btn-primary" style="margin-top:16px" id="csSave" onclick="csSaveLead()">Simpan Lead</button></div>';
+  }
+  return (csSuccess ? '' : '<div class="seg" style="margin-top:4px"><button class="' + (csMode === 'umum' ? 'on' : '') + '" onclick="csSetMode(\'umum\')">Umum</button><button class="' + (csMode === 'iklan' ? 'on' : '') + '" onclick="csSetMode(\'iklan\')">Iklan</button><button class="' + (csMode === 'spam' ? 'on' : '') + '" onclick="csSetMode(\'spam\')">Spam</button></div>') +
+    body + pendingAcceptHtml(pending) +
+    '<div class="section-h"><h2>Riwayat</h2></div><div class="group"><button class="row" onclick="openSheet(\'riwayat\')"><div class="main"><div class="t">Riwayat Input</div><div class="s">Lead umum, iklan & spam yang sudah dicatat</div></div>' + chev + '</button></div>';
+}
+function csErr(m) { if ($('csErr')) { $('csErr').textContent = m; $('csErr').classList.remove('hidden'); } }
+function csLeadDupCheck(waNumber) {
+  const d = toWaDigits(waNumber);
+  const local = allLeadsData.filter(function (l) { return toWaDigits(l.waNumber) === d; });
+  return checkDuplicateAcrossTeam(waNumber).then(function (m) {
+    const map = {}; m.concat(local).forEach(function (x) { map[x.id] = x; });
+    return Object.keys(map).map(function (k) { return map[k]; });
+  });
+}
+function findSpamRecordV2(raw) {
+  const digits = toWaDigits(raw);
+  if (!digits) return Promise.resolve(null);
+  return db.collection('spamNumbers').where('waDigits', '==', digits).limit(1).get()
+    .then(function (s) { return s.docs.length ? Object.assign({ id: s.docs[0].id }, s.docs[0].data()) : null; })
+    .catch(function () { return null; });
+}
+function spamDesc(s) { const d = s && s.createdAt ? toJsDate(s.createdAt) : null; return (s.project || '-') + (d ? ', ' + formatDateID(d) : '') + (s.createdBy ? ', dicatat ' + s.createdBy : ''); }
+function csSaveLead() {
+  csCapture();
+  const f = csForm, isAd = csMode === 'iklan';
+  const buyerName = String(f.csName || '').trim(), waNumber = String(f.csWa || '').trim(), adSource = String(f.csSource || '').trim(), project = f.csProject || '', csNote = String(f.csNote || '').trim();
+  if (!buyerName || !waNumber || !adSource || !project) return csErr('Lengkapi nama, nomor WhatsApp, sumber iklan, dan proyek.');
+  if (!isAd && !f.csAssign) return csErr('Pilih marketing yang ditugaskan.');
+  if (isAd && !csRotationList().length) return csErr('Belum ada marketing aktif yang ikut rotasi iklan. Minta Super Admin mengaturnya di Kelola Akun.');
+  const waErr = validateWaNumber(waNumber); if (waErr) return csErr(waErr);
+  const btn = $('csSave'); btn.disabled = true; btn.textContent = 'Memeriksa nomor…';
+  csLeadDupCheck(waNumber).then(function (matches) {
+    if (matches.length && !confirm(buildDuplicateWarning(matches))) return false;
+    return findSpamRecordV2(waNumber).then(function (spam) { return !spam || confirm('Peringatan: nomor ini pernah dicatat sebagai SPAM (' + spamDesc(spam) + ').\n\nTetap simpan sebagai lead?'); });
+  }).then(function (go2) {
+    if (!go2) return null;
+    btn.textContent = 'Menyimpan…';
+    const data = {
+      buyerName: buyerName, waNumber: waNumber, waDigits: toWaDigits(waNumber), adSource: adSource, project: project,
+      assignedTo: isAd ? '' : f.csAssign, csNote: csNote, isAdLead: isAd, status: 'New', isHot: false, nextFollowUpDate: defaultNextFollowUp(),
+      pendingAccept: true, acceptDeadline: firebase.firestore.Timestamp.fromMillis(Date.now() + ACCEPT_WINDOW_MS), passedFrom: [],
+      createdAt: FieldValue.serverTimestamp(), lastUpdated: FieldValue.serverTimestamp()
+    };
+    const ref = db.collection('leads').doc();
+    let p;
+    if (isAd) {
+      const rotRef = db.collection('settings').doc('adRotation'), list = csRotationList();
+      p = db.runTransaction(function (tx) {
+        return tx.get(rotRef).then(function (snap) {
+          const rot = snap.exists ? snap.data() : {};
+          const counter = snap.exists ? (Number(rot.counter) || 0) : allLeadsData.filter(function (l) { return l.isAdLead === true; }).length;
+          const q = normalizeRotationQueue(rot.queue, list, counter);
+          data.assignedTo = q[0];
+          tx.set(rotRef, { counter: counter + 1, queue: q.slice(1).concat([q[0]]), updatedAt: FieldValue.serverTimestamp() });
+          tx.set(ref, data);
+        });
+      });
+    } else p = ref.set(data);
+    return p.then(function () {
+      callNotify('lead-created', ref.id);
+      waIndexPut(ref.id, { waNumber: waNumber, assignedTo: data.assignedTo, status: 'New', project: project, createdAt: new Date() });
+      csSuccess = { id: ref.id, buyerName: buyerName, waNumber: waNumber, adSource: adSource, project: project, assignedTo: data.assignedTo, csNote: csNote, acceptDeadline: data.acceptDeadline };
+      csForm = { csProject: project, csSource: adSource };
+      rerender(); window.scrollTo(0, 0);
+    });
+  }).catch(function (e) { csErr('Gagal menyimpan lead: ' + e.message); })
+    .finally(function () { if (document.body.contains(btn)) { btn.disabled = false; btn.textContent = 'Simpan Lead'; } });
+}
+function csSaveSpam() {
+  csCapture();
+  const waNumber = String(csForm.csWa || '').trim(), project = csForm.csProject || '';
+  if (!waNumber || !project) return csErr('Isi nomor WhatsApp dan proyek.');
+  const waErr = validateWaNumber(waNumber); if (waErr) return csErr(waErr);
+  const asLead = allLeadsData.find(function (l) { return toWaDigits(l.waNumber) === toWaDigits(waNumber); });
+  if (asLead && !confirm('Nomor ini terdaftar sebagai lead "' + (asLead.buyerName || '-') + '" (marketing ' + (asLead.assignedTo || '-') + ', status ' + (asLead.status || '-') + ').\n\nTetap catat sebagai spam?')) return;
+  const btn = $('csSave'); btn.disabled = true; btn.textContent = 'Memeriksa nomor…';
+  findSpamRecordV2(waNumber).then(function (prev) {
+    if (prev && !confirm('Nomor ini sudah pernah dicatat sebagai spam (' + spamDesc(prev) + ').\n\nCatat lagi?')) return;
+    btn.textContent = 'Menyimpan…';
+    return db.collection('spamNumbers').add({ waNumber: waNumber, waDigits: toWaDigits(waNumber), project: project, createdBy: currentUser.name || '', createdByUid: currentUser.uid, createdAt: FieldValue.serverTimestamp() })
+      .then(function () { csForm = { csProject: project }; toast('Nomor spam tercatat'); rerender(); });
+  }).catch(function (e) { csErr('Gagal menyimpan nomor spam: ' + e.message); })
+    .finally(function () { if (document.body.contains(btn)) { btn.disabled = false; btn.textContent = 'Simpan Spam'; } });
+}
+// Cadangan: beri tahu marketing lewat WA (kalau belum mengaktifkan notifikasi).
+function csNotifyWa(leadId) {
+  const l = allLeadsData.find(function (x) { return x.id === leadId; }) || (csSuccess && csSuccess.id === leadId ? csSuccess : null);
+  if (!l) return;
+  const u = usersData.find(function (x) { return x.name === l.assignedTo; });
+  const number = (u && u.waNumber) || '';
+  if (!number) { alert('Nomor WA marketing ' + l.assignedTo + ' belum diisi. Lengkapi di Kelola Akun.'); return; }
+  const deadline = acceptDeadlineMs(l) || (Date.now() + ACCEPT_WINDOW_MS);
+  const link = APP.crmUrl ? String(APP.crmUrl).replace(/\/+$/, '') + '/v2/' : '';
+  const msg = 'Halo ' + l.assignedTo + ', ada LEAD BARU masuk untuk kamu!\n\n- Proyek: ' + (l.project || '-') + '\n- Sumber: ' + (l.adSource || '-') + '\n\n' +
+    'Segera buka CRM dan tekan TERIMA sebelum jam ' + formatClock(deadline) + ' (batas 5 menit). Kalau lewat, lead otomatis dialihkan ke marketing lain.' +
+    (link ? '\n\n' + link : '') + '\n\nNama & nomor buyer akan muncul setelah kamu menekan Terima. Terima kasih!';
+  window.open('https://wa.me/' + toWaDigits(number) + '?text=' + encodeURIComponent(msg), '_blank');
 }
 
 // ---------- Lainnya ----------
@@ -1007,7 +1157,7 @@ function moreScreen() {
   const staffLinks = role === 'staff' ? '<div class="section-h"><h2>Fitur lanjutan</h2></div><div class="group">' +
     '<button class="row" onclick="openSheet(\'broadcast\')"><div class="main"><div class="t">Kirim Notif</div><div class="s">Peringatan / pengumuman ke HP marketing</div></div>' + chev + '</button>' +
     '<button class="row" onclick="openSheet(\'waRemind\')"><div class="main"><div class="t">Kirim Pengingat WA</div><div class="s">Rekap lead jatuh tempo per marketing</div></div>' + chev + '</button>' +
-    (currentUser.role === 'Admin' ? old('Riwayat Input', 'Lead umum, iklan & spam dari CS') : '') +
+    '<button class="row" onclick="openSheet(\'riwayat\')"><div class="main"><div class="t">Riwayat Input</div><div class="s">Lead umum, iklan & spam dari CS</div></div>' + chev + '</button>' +
     (currentUser.role === 'SuperAdmin' ? old('Kelola Akun & Proyek', 'Tambah / ubah akun, daftar proyek, reset data') + old('Atur Target KPI', 'Target & bobot 7 indikator') + old('Tes Push', 'Uji notifikasi ke HP') : '') +
     '</div><p class="foot">Kirim Notif & Pengingat WA terbuka di sini. Fitur lainnya dibuka di tampilan lama (lebih nyaman di laptop), login yang sama.</p>' : '';
   return '<div class="group"><div class="row ind"><div class="avatar" style="background:var(--tint)">' + esc(initials(currentUser.name)) + '</div><div class="main"><div class="t">' + esc(currentUser.name) + '</div><div class="s">' + esc(roleLabel) + ' · ' + esc(String(currentUser.email || '').split('@')[0]) + '</div></div></div></div>' +
@@ -1023,6 +1173,64 @@ function moreScreen() {
 // Sheets
 // =====================================================================
 const SHEETS = {};
+
+// =====================================================================
+// Riwayat Input (CS, SPV/Manager, Super Admin): lead dari CS (umum & iklan) + nomor spam.
+// =====================================================================
+function rwRange(f) {
+  if (f.preset === 'all') return { from: null };
+  const days = f.preset === 'today' ? 1 : Number(f.preset), n = new Date();
+  return { from: new Date(n.getFullYear(), n.getMonth(), n.getDate() - (days - 1)) };
+}
+function rwLoadSpam() {
+  const f = sheetState.form, r = rwRange(f), key = f.preset;
+  f.spamKey = key; f.spamLoading = true;
+  let q = db.collection('spamNumbers');
+  if (r.from) q = q.where('createdAt', '>=', firebase.firestore.Timestamp.fromMillis(r.from.getTime()));
+  q.orderBy('createdAt', 'desc').limit(1000).get().then(function (s) {
+    if (f.spamKey !== key) return;
+    f.spam = s.docs.map(function (d) { return Object.assign({ id: d.id }, d.data({ serverTimestamps: 'estimate' })); });
+  }).catch(function (e) { console.warn(e); f.spam = []; })
+    .finally(function () { f.spamLoading = false; if (sheetState && sheetState.form === f) renderSheet(); });
+}
+function rwSet(k, v) { const f = sheetState.form; f[k] = v; if (k === 'preset') rwLoadSpam(); renderSheet(); }
+SHEETS.riwayat = function () {
+  const f = sheetState.form;
+  if (!f.init) { f.init = true; f.preset = '7'; f.type = 'all'; f.spam = []; rwLoadSpam(); }
+  const r = rwRange(f);
+  const leads = allLeadsData.filter(function (l) { return !l.isSelfInput && (!r.from || toJsDate(l.createdAt) >= r.from); });
+  const spam = (f.spam || []).filter(function (s) { return !r.from || toJsDate(s.createdAt) >= r.from; });
+  const ad = leads.filter(function (l) { return l.isAdLead === true; }).length, umum = leads.length - ad;
+  const rows = leads.filter(function (l) { return f.type === 'all' || (f.type === 'iklan' ? l.isAdLead === true : f.type === 'umum' ? l.isAdLead !== true : false); })
+    .map(function (l) { return { d: toJsDate(l.createdAt), l: l }; })
+    .concat(f.type === 'all' || f.type === 'spam' ? spam.map(function (s) { return { d: toJsDate(s.createdAt), s: s }; }) : [])
+    .sort(function (a, b) { return b.d - a.d; }).slice(0, 300);
+  const chip = function (label, on, js) { return '<button class="pill ' + (on ? 'p-blue' : 'p-gray') + '" style="border:0;font-size:13px;padding:6px 12px" onclick="' + js + '">' + label + '</button>'; };
+  const list = rows.length ? '<div class="group">' + rows.map(function (x) {
+    const when = formatDateID(x.d) + ' ' + formatTimeID(x.d);
+    if (x.s) return '<div class="row"><div class="main"><div class="t">' + esc(x.s.waNumber || '-') + ' <span class="pill p-gray" style="margin-left:4px">Spam</span></div><div class="s">' + esc(x.s.project || '-') + ' · ' + esc(when) + (x.s.createdBy ? ' · ' + esc(x.s.createdBy) : '') + '</div></div>' +
+      '<button class="btn-plain tiny" style="color:var(--red)" onclick="rwDeleteSpam(\'' + esc(x.s.id) + '\')">Hapus</button></div>';
+    const l = x.l;
+    return '<button class="row" onclick="openSheet(\'lead\',\'' + esc(l.id) + '\')"><div class="main"><div class="t">' + esc(l.buyerName || '-') + ' <span class="pill ' + (l.isAdLead ? 'p-purple' : 'p-blue') + '" style="margin-left:4px">' + (l.isAdLead ? 'Iklan' : 'Umum') + '</span></div>' +
+      '<div class="s">' + esc(l.project || '-') + ' · ' + esc(isPendingAccept(l) ? 'menunggu ' + (l.assignedTo || '-') : (l.assignedTo || '-')) + ' · ' + esc(when) + '</div></div>' + chev + '</button>';
+  }).join('') + '</div>' : '<div class="card empty">Belum ada input di rentang ini.</div>';
+  let perProject = '';
+  if (f.type === 'spam' && spam.length) {
+    const m = {}; spam.forEach(function (s) { const p = s.project || '-'; m[p] = (m[p] || 0) + 1; });
+    perProject = ' · ' + Object.keys(m).sort(function (a, b) { return m[b] - m[a]; }).map(function (p) { return p + ': ' + m[p]; }).join(', ');
+  }
+  return sheetHead('Riwayat Input') +
+    '<div class="hstack" style="gap:8px;flex-wrap:wrap">' + chip('Hari ini', f.preset === 'today', "rwSet('preset','today')") + chip('7 hari', f.preset === '7', "rwSet('preset','7')") + chip('30 hari', f.preset === '30', "rwSet('preset','30')") + chip('Semua', f.preset === 'all', "rwSet('preset','all')") + '</div>' +
+    '<div class="seg"><button class="' + (f.type === 'all' ? 'on' : '') + '" onclick="rwSet(\'type\',\'all\')">Semua ' + (leads.length + spam.length) + '</button><button class="' + (f.type === 'umum' ? 'on' : '') + '" onclick="rwSet(\'type\',\'umum\')">Umum ' + umum + '</button><button class="' + (f.type === 'iklan' ? 'on' : '') + '" onclick="rwSet(\'type\',\'iklan\')">Iklan ' + ad + '</button><button class="' + (f.type === 'spam' ? 'on' : '') + '" onclick="rwSet(\'type\',\'spam\')">Spam ' + spam.length + '</button></div>' +
+    '<p class="foot" style="margin-top:10px">' + rows.length + ' input' + perProject + (f.spamLoading ? ' · memuat spam…' : '') + '</p>' + list +
+    '<p class="foot">Lead yang sudah Closing/Lost lebih dari 90 hari tidak ditampilkan (mode hemat kuota).</p>';
+};
+function rwDeleteSpam(id) {
+  const f = sheetState.form, rec = (f.spam || []).find(function (s) { return s.id === id; });
+  if (!confirm('Hapus catatan spam ' + (rec ? rec.waNumber : '') + '? Gunakan ini hanya kalau salah input.')) return;
+  db.collection('spamNumbers').doc(id).delete().then(function () { f.spam = f.spam.filter(function (s) { return s.id !== id; }); renderSheet(); toast('Catatan spam dihapus'); })
+    .catch(function (e) { alert('Gagal menghapus catatan spam: ' + e.message); });
+}
 
 // =====================================================================
 // SPV/Manager & Super Admin: Kirim Notif (push) — sama dengan tampilan lama, server api/broadcast.js
