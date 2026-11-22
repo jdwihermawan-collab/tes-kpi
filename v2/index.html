@@ -1086,9 +1086,8 @@ SHEETS.report = function () {
     '<div style="margin-top:14px"><label class="field"><span>Tanggal</span><input id="repDate" type="date" value="' + esc(f.date || today) + '" min="' + kpiCurrentMonth() + '-01" max="' + today + '"></label>' +
     (live ? '<label class="field"><span>Link video Live TikTok</span><input id="repLink" inputmode="url" value="' + esc(f.link || '') + '" placeholder="https://www.tiktok.com/@…"></label>'
       : '<label class="field"><span>Lokasi canvasing</span><input id="repPlace" value="' + esc(f.place || '') + '" placeholder="Perum Griya Asri Blok C"></label>' +
-        '<label class="field"><span>Izin dari</span><input id="repPermit" value="' + esc(f.permit || '') + '" placeholder="Pak Budi, Ketua RT 05"></label>' +
-        '<div class="grid2" style="margin-top:10px"><label class="field"><span>Lapor di grup</span><input id="repGroup" value="' + esc(f.group || '') + '" placeholder="Grup Marketing"></label><label class="field"><span>Jam lapor</span><input id="repTime" type="time" value="' + esc(f.time || '') + '"></label></div>') +
-    '<label class="field"><span>Keterangan (opsional)</span><input id="repNote" value="' + esc(f.note || '') + '" placeholder="Live 2 jam, 35 penonton"></label></div>' +
+        '<label class="field"><span>Izin dari</span><input id="repPermit" value="' + esc(f.permit || '') + '" placeholder="Pak Budi, Ketua RT 05"></label>') +
+    '<label class="field"><span>Keterangan (opsional)</span><input id="repNote" value="' + esc(f.note || '') + '" placeholder="' + (live ? 'Live 2 jam, 35 penonton' : 'Canvasing di area Jl. Merdeka') + '"></label></div>' +
     '<p class="err hidden" id="repErr"></p><p class="foot">Satu hari dengan laporan valid = 1 hitungan KPI Online/Offline.</p>';
 };
 function captureRep() {
@@ -1302,10 +1301,8 @@ function saveReportV2() {
     doc.link = link.slice(0, 500);
   } else {
     doc.place = String(f.place || '').trim().slice(0, 150); doc.permitFrom = String(f.permit || '').trim().slice(0, 150);
-    doc.reportGroup = String(f.group || '').trim().slice(0, 100); doc.reportTime = f.time || '';
     if (!doc.place) return err('Isi lokasi canvasing.');
     if (!doc.permitFrom) return err('Isi izin canvasing didapat dari siapa.');
-    if (!doc.reportGroup || !doc.reportTime) return err('Isi nama grup dan jam kamu melapor di grup.');
   }
   const btn = $('repSave'); btn.disabled = true; btn.textContent = 'Mengirim…';
   kpiReportsRef(currentUser.uid).add(doc).then(function () {

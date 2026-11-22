@@ -102,7 +102,7 @@ service cloud.firestore {
       function str(f, max) { return request.resource.data.get(f, '') is string && request.resource.data.get(f, '').size() <= max; }
       function filled(f) { return request.resource.data.get(f, '') is string && request.resource.data.get(f, '').size() > 0; }
       allow read: if isStaff() || (isSelf(uid) && isActive());
-      // Live TikTok wajib link; Canvasing wajib lokasi, izin dari siapa, grup & jam lapor.
+      // Live TikTok wajib link; Canvasing wajib lokasi & izin dari siapa (grup & jam lapor opsional).
       allow create: if isMarketing() && isSelf(uid)
         && request.resource.data.dateKey is string
         && request.resource.data.dateKey.size() == 10
@@ -110,8 +110,7 @@ service cloud.firestore {
         && request.resource.data.get('invalid', false) == false
         && ((request.resource.data.type == 'Live TikTok' && filled('link') && str('link', 500))
           || (request.resource.data.type == 'Canvasing' && filled('place') && filled('permitFrom')
-              && filled('reportGroup') && filled('reportTime')
-              && str('place', 150) && str('permitFrom', 150) && str('reportGroup', 100)));
+              && str('place', 150) && str('permitFrom', 150) && str('reportGroup', 100) && str('reportTime', 10)));
       // SPV/Manager & Super Admin hanya boleh menandai valid / tidak valid.
       allow update: if isVerifier()
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['invalid', 'invalidReason', 'invalidBy', 'invalidAt']);
