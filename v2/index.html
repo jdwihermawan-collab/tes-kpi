@@ -558,6 +558,12 @@ function afterKpiChange() { // aksi yang mengubah KPI: muat ulang data bulan ini
   if (role === 'marketing') loadMyKpi(true); else loadTeamKpi(true);
 }
 function rowScore(r) { return kpiScore(r.counts, kpiItems()); }
+// Predikat penilaian kinerja (sama dengan tabel KPI lama): >= 75 Above, 60–75 Perform, < 60 Not Perform.
+// Untuk bulan berjalan predikatnya masih sementara.
+function kpiGrade(score) {
+  return score >= 75 ? { label: 'Above', cls: 'p-green' } : score >= 60 ? { label: 'Perform', cls: 'p-blue' } : { label: 'Not Perform', cls: 'p-red' };
+}
+function gradePill(score, temp) { const g = kpiGrade(score); return '<span class="pill ' + g.cls + '">' + (temp ? 'Sementara: ' : '') + g.label + '</span>'; }
 function pacePct() { const n = new Date(); return n.getDate() / new Date(n.getFullYear(), n.getMonth() + 1, 0).getDate() * 100; }
 
 function loadTrend(uid) {
@@ -682,6 +688,7 @@ function homeMk() {
       '<div class="ring-wrap" style="width:124px;height:124px">' + ring(sc, 124, 12, sc >= pace ? 'var(--green)' : 'var(--tint)') + '<div class="ring-num"><b>' + fmt(sc) + '</b><span>dari 100</span></div></div>' +
       '<div style="flex:1;min-width:0"><div style="font-weight:600;font-size:16px">' + (sc >= 99.95 ? 'Target tercapai' : sc >= pace ? 'Di atas jalur' : 'Di bawah jalur') + '</div>' +
       '<div class="muted tiny" style="margin-top:4px;line-height:1.4">Hari ke-' + new Date().getDate() + '. Jalur hari ini ' + fmt(pace) + '.</div>' +
+      '<div style="margin-top:8px">' + gradePill(sc, true) + '</div>' +
       (pend ? '<div class="tiny" style="margin-top:8px;color:#A55E00">' + pend + ' closing menunggu verifikasi</div>' : '') + '</div></div>' +
       '<div class="stat3"><div><b class="num">' + r.counts.dbBaru + '</b><span>Database baru</span></div><div><b class="num">' + r.counts.followUp + '</b><span>Follow up</span></div><div><b class="num">' + r.counts.online + '</b><span>Hari lapor</span></div></div></button>';
   }
@@ -774,7 +781,8 @@ function kpiPersonBody(r, month, isSelf) {
   return '<div class="card" style="margin-top:12px;display:flex;align-items:center;gap:18px"><div class="ring-wrap" style="width:124px;height:124px">' + ring(sc.total, 124, 12, cur && sc.total >= pace ? 'var(--green)' : 'var(--tint)') +
       '<div class="ring-num"><b>' + fmt(sc.total) + '</b><span>dari 100</span></div></div>' +
       '<div style="min-width:0"><div style="font-weight:600">' + esc(r.name) + '</div><div class="muted tiny" style="margin-top:4px;line-height:1.45">' + kpiMonthLabel(month) +
-      (cur ? '<br>Jalur hari ini ' + fmt(pace) : '') + (kpiData && kpiData.mode === 'rekap' ? '<br>Rekap s.d. ' + kpiData.asOf.split('-').reverse().slice(0, 2).join('/') + ' + data terbaru' : '') + '</div></div></div>' +
+      (cur ? '<br>Jalur hari ini ' + fmt(pace) : '') + (kpiData && kpiData.mode === 'rekap' ? '<br>Rekap s.d. ' + kpiData.asOf.split('-').reverse().slice(0, 2).join('/') + ' + data terbaru' : '') + '</div>' +
+      '<div style="margin-top:8px">' + gradePill(sc.total, cur) + '</div></div></div>' +
     '<div class="section-h"><h2>Indikator</h2></div><div class="group">' + indicators + '</div>' +
     (isSelf && cur ? '<button class="btn btn-tinted" style="margin-top:14px" onclick="openSheet(\'report\')">Lapor Live TikTok / Canvasing</button>' : '') +
     '<div class="section-h"><h2>Tren 6 bulan</h2></div>' + trendCardHtml(r.uid, cur ? sc.total : null) +
@@ -922,9 +930,9 @@ function kpiTeamScreen() {
     (rows.length ? '<div class="group">' + rows.map(function (x, k) {
       return '<button class="row ind" onclick="openSheet(\'person\',' + x.i + ')"><div class="avatar" style="background:' + colorFor(x.r.name) + '">' + esc(initials(x.r.name)) + '</div>' +
         '<div class="main"><div class="hstack"><div class="t" style="flex:1">' + (k + 1) + '. ' + esc(x.r.name) + '</div><b class="num">' + fmt(x.s) + '</b></div>' +
-        '<div class="bar" style="margin-top:8px"><i style="width:' + Math.min(100, x.s) + '%;background:' + (cur && x.s >= pace ? 'var(--green)' : 'var(--tint)') + '"></i></div></div>' + chev + '</button>';
+        '<div class="bar" style="margin-top:8px"><i style="width:' + Math.min(100, x.s) + '%;background:' + (cur && x.s >= pace ? 'var(--green)' : 'var(--tint)') + '"></i></div><div style="margin-top:8px">' + gradePill(x.s, false) + '</div></div>' + chev + '</button>';
     }).join('') + '</div>' : '<div class="card empty">Belum ada akun marketing aktif.</div>') +
-    (cur ? '<p class="foot">Hijau = sudah di atas jalur hari ini.' : '<p class="foot">') +
+    '<p class="foot">Predikat: 75 ke atas Above · 60–75 Perform · di bawah 60 Not Perform' + (cur ? ' (sementara, final di akhir bulan). Bar hijau = sudah di atas jalur hari ini.' : '.') +
     (kpiData.mode === 'rekap' ? ' Rekap s.d. ' + kpiData.asOf.split('-').reverse().slice(0, 2).join('/') + ' + data terbaru.' : '') +
     (!cur && kpiCanVerify() ? ' <button class="btn-plain tiny" onclick="saveTrendSnapshot()">Simpan ke grafik tren</button>' : '') + '</p>';
 }
