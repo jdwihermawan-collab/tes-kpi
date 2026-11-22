@@ -81,6 +81,8 @@
   .field textarea{resize:none;min-height:70px}
   .field + .field,.field + .grid2,.grid2 + .field{margin-top:10px}
   .grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+  .grid2 > *{min-width:0}
+  .field input[type=date]{min-width:0;max-width:100%}
   .grid2 .field{margin:0}
   .search{display:flex;align-items:center;gap:8px;background:var(--fill2);border-radius:12px;height:38px;padding:0 10px;color:var(--label2);flex:1}
   .search input{flex:1;border:0;outline:0;background:transparent;font-size:16px;min-width:0}
@@ -294,7 +296,7 @@ function sheetHead(title, rightHtml, leftLabel) {
   return '<div class="sheet-head"><div class="side"><button class="btn-plain" onclick="closeSheet()">' + (leftLabel || 'Tutup') + '</button></div><h3>' + title + '</h3><div class="side r">' + (rightHtml || '') + '</div></div>';
 }
 // Sheet yang berisi formulir tidak di-render ulang otomatis saat data berubah (isian tidak hilang).
-function sheetIsForm() { return sheetState && ['update', 'newLead', 'report', 'pdf', 'broadcast', 'waRemind', 'manage', 'kpiSettings', 'testPush', 'leadFilter'].indexOf(sheetState.kind) !== -1; }
+function sheetIsForm() { return sheetState && ['update', 'newLead', 'report', 'pdf', 'broadcast', 'waRemind', 'manage', 'kpiSettings', 'testPush', 'leadFilter', 'leadExport'].indexOf(sheetState.kind) !== -1; }
 
 // =====================================================================
 // Login & sesi
@@ -401,7 +403,7 @@ function stopAll() {
   Object.keys(trendCache).forEach(function (k) { delete trendCache[k]; });
   kpiReportsCache = {};
   resetNotifState('marketing'); resetNotifState('csAdmin');
-  csSuccess = null; csForm = {}; selMode = false; selIds.clear();
+  csSuccess = null; csForm = {}; selMode = false; selIds.clear(); exportAllLeads = null;
   leadFilter = { status: '', project: '', dateType: 'createdAt', from: '', to: '' };
   closeSheet();
 }
@@ -1173,6 +1175,7 @@ function moreScreen() {
   const staffLinks = role === 'staff' ? '<div class="section-h"><h2>Fitur lanjutan</h2></div><div class="group">' +
     '<button class="row" onclick="openSheet(\'broadcast\')"><div class="main"><div class="t">Kirim Notif</div><div class="s">Peringatan / pengumuman ke HP marketing</div></div>' + chev + '</button>' +
     '<button class="row" onclick="openSheet(\'waRemind\')"><div class="main"><div class="t">Kirim Pengingat WA</div><div class="s">Rekap lead jatuh tempo per marketing</div></div>' + chev + '</button>' +
+    sheetRow('leadExport', 'Export Data Lead', 'Per sumber (mis. Pameran), jenis, tanggal, proyek') +
     '<button class="row" onclick="openSheet(\'reminderLog\')"><div class="main"><div class="t">Log Pengingat</div><div class="s">Siapa saja yang sudah mengingatkan marketing</div></div>' + chev + '</button>' +
     '<button class="row" onclick="openSheet(\'riwayat\')"><div class="main"><div class="t">Riwayat Input</div><div class="s">Lead umum, iklan & spam dari CS</div></div>' + chev + '</button>' +
     (currentUser.role === 'SuperAdmin' ? sheetRow('manage', 'Kelola Akun & Proyek', 'Tambah / ubah akun, daftar proyek, reset data') + sheetRow('kpiSettings', 'Atur Target KPI', 'Target & bobot 7 indikator') + sheetRow('testPush', 'Tes Push', 'Uji notifikasi ke HP') : '') +
@@ -1220,27 +1223,98 @@ function applyLeadFilter() {
   leadFilter = { status: $('lfStatus').value, project: $('lfProject').value, dateType: $('lfType').value, from: $('lfFrom').value, to: $('lfTo').value };
   closeSheet(); rerender();
 }
+// ---------- Export Data per kategori (sumber/kata kunci, jenis, tanggal, proyek, marketing, status) ----------
+// Contoh: semua lead "Pameran" 1–15 Maret. Data yang dipakai = lead yang sudah dimuat (aktif + selesai 90 hari);
+// untuk rentang lebih lama, tombol "Muat semua data" membaca seluruh lead sekali.
+let exportAllLeads = null;
+const EXPORT_KINDS = [['', 'Semua jenis'], ['iklan', 'Lead iklan (rotasi)'], ['umum', 'Input CS umum'], ['mandiri', 'Input mandiri marketing'], ['walkin', 'Walk-in']];
+const EXPORT_STATUS = [['', 'Semua status (termasuk selesai)'], ['aktif', 'Aktif saja'], ['closing', 'Closing ITJ / SPPR'], ['lost', 'Lost (Batal)']];
+function exportPool() { return exportAllLeads || (role === 'marketing' ? marketingLeadsData : allLeadsData); }
+function exportMatch(l, f) {
+  if (role === 'marketing' && isPendingAccept(l)) return false;
+  if (f.from && toJsDate(l.createdAt) < new Date(f.from + 'T00:00:00')) return false;
+  if (f.to && toJsDate(l.createdAt) > new Date(f.to + 'T23:59:59')) return false;
+  const kw = String(f.kw || '').trim().toLowerCase();
+  if (kw && (String(l.adSource || '') + ' ' + String(l.csNote || '')).toLowerCase().indexOf(kw) === -1) return false;
+  if (f.kind === 'iklan' && l.isAdLead !== true) return false;
+  if (f.kind === 'umum' && (l.isAdLead === true || l.isSelfInput === true)) return false;
+  if (f.kind === 'mandiri' && l.isSelfInput !== true) return false;
+  if (f.kind === 'walkin' && !/walk.?in/i.test(String(l.adSource || ''))) return false;
+  if (f.project && l.project !== f.project) return false;
+  if (f.mk && l.assignedTo !== f.mk) return false;
+  if (f.status === 'aktif' && isClosed(l)) return false;
+  if (f.status === 'closing' && ['Closing ITJ', 'Closing SPPR', 'Closed (Deal)'].indexOf(l.status) === -1) return false;
+  if (f.status === 'lost' && l.status !== 'Lost (Batal)') return false;
+  return true;
+}
+function exportCapture() {
+  const f = sheetState.form;
+  ['from', 'to', 'kw', 'kind', 'project', 'mk', 'status'].forEach(function (k) { const el = $('ex_' + k); if (el) f[k] = el.value; });
+}
+function exportList(f) { return exportPool().filter(function (l) { return exportMatch(l, f); }).sort(function (a, b) { return toJsDate(a.createdAt) - toJsDate(b.createdAt); }); }
+function exportDesc(f) {
+  const parts = [];
+  if (f.kw) parts.push('Sumber/kata kunci: "' + f.kw + '"');
+  if (f.kind) parts.push((EXPORT_KINDS.find(function (x) { return x[0] === f.kind; }) || [0, ''])[1]);
+  if (f.from || f.to) parts.push('Tanggal masuk ' + (f.from ? formatDateID(new Date(f.from + 'T00:00:00')) : '…') + ' – ' + (f.to ? formatDateID(new Date(f.to + 'T00:00:00')) : '…'));
+  if (f.project) parts.push('Proyek ' + f.project);
+  if (f.status) parts.push((EXPORT_STATUS.find(function (x) { return x[0] === f.status; }) || [0, ''])[1]);
+  return parts;
+}
+function exportLoadAll() {
+  const f = sheetState.form; exportCapture();
+  f.loadingAll = true; renderSheet();
+  const q = role === 'marketing' ? db.collection('leads').where('assignedTo', '==', currentUser.name) : db.collection('leads');
+  q.get().then(function (s) { exportAllLeads = s.docs.map(function (d) { return Object.assign({ id: d.id }, d.data()); }); })
+    .catch(function (e) { alert('Gagal memuat semua data: ' + e.message); })
+    .finally(function () { f.loadingAll = false; if (sheetState && sheetState.form === f) renderSheet(); });
+}
 SHEETS.leadExport = function () {
-  const n = filteredLeads().length;
-  return sheetHead('Export') + '<p class="foot" style="margin-top:0">' + n + ' lead sesuai filter yang sedang aktif akan diekspor.</p>' +
-    '<button class="btn btn-primary" style="margin-top:10px" onclick="closeSheet();exportLeadsPdfV2()">Unduh PDF</button>' +
-    '<button class="btn btn-tinted" style="margin-top:10px" onclick="closeSheet();exportLeadsCsvV2()">Unduh CSV (Excel)</button>';
+  const f = sheetState.form;
+  if (!f.init) {
+    const n = new Date();
+    f.init = true; f.from = toDateInputValue(new Date(n.getFullYear(), n.getMonth(), 1)); f.to = toDateInputValue(n);
+    f.kw = ''; f.kind = ''; f.project = ''; f.mk = role === 'marketing' ? '' : leadMk; f.status = '';
+  }
+  const pool = exportPool(), list = exportList(f);
+  const sources = {}; pool.forEach(function (l) { const s = String(l.adSource || '').trim(); if (s) sources[s] = (sources[s] || 0) + 1; });
+  const srcList = Object.keys(sources).sort(function (a, b) { return sources[b] - sources[a]; });
+  const sel = function (id, opts, v) { return '<select id="ex_' + id + '" onchange="exportCapture();renderSheet()">' + opts.map(function (o) { return '<option value="' + esc(o[0]) + '"' + (o[0] === v ? ' selected' : '') + '>' + esc(o[1]) + '</option>'; }).join('') + '</select>'; };
+  const old = f.from && new Date(f.from + 'T00:00:00') < new Date(Date.now() - 90 * 86400000);
+  const chip = function (s) { return '<button class="pill ' + (f.kw === s ? 'p-blue' : 'p-gray') + '" style="border:0;font-size:13px;padding:6px 12px" onclick="exportCapture();sheetState.form.kw=' + (f.kw === s ? "''" : "'" + esc(s).replace(/'/g, "\\'") + "'") + ';renderSheet()">' + esc(s) + ' · ' + sources[s] + '</button>'; };
+  return sheetHead('Export Data') +
+    '<p class="foot" style="margin-top:0">Pilih kategori data yang mau diekspor, misalnya semua lead Pameran dari tanggal tertentu.</p>' +
+    '<div class="grid2"><label class="field"><span>Tanggal masuk dari</span><input id="ex_from" type="date" value="' + esc(f.from) + '" onchange="exportCapture();renderSheet()"></label><label class="field"><span>Sampai</span><input id="ex_to" type="date" value="' + esc(f.to) + '" onchange="exportCapture();renderSheet()"></label></div>' +
+    '<label class="field"><span>Sumber / kata kunci</span><input id="ex_kw" value="' + esc(f.kw) + '" placeholder="Pameran, Meta Ads, TikTok…" onchange="exportCapture();renderSheet()"></label>' +
+    (srcList.length ? '<div class="hstack" style="gap:6px;flex-wrap:wrap;margin-top:8px">' + srcList.slice(0, 12).map(chip).join('') + '</div>' : '') +
+    '<p class="foot">Dicari di kolom Sumber dan Catatan CS. Kosongkan untuk semua sumber.</p>' +
+    '<label class="field"><span>Jenis lead</span>' + sel('kind', EXPORT_KINDS, f.kind) + '</label>' +
+    '<label class="field"><span>Proyek</span>' + sel('project', [['', 'Semua proyek']].concat(projectList.map(function (p) { return [p, p]; })), f.project) + '</label>' +
+    (role === 'marketing' ? '' : '<label class="field"><span>Marketing</span>' + sel('mk', [['', 'Semua marketing']].concat(activeMarketingUsers().map(function (u) { return [u.name, u.name]; })), f.mk) + '</label>') +
+    '<label class="field"><span>Status</span>' + sel('status', EXPORT_STATUS, f.status) + '</label>' +
+    '<div class="card" style="margin-top:14px;padding:14px 16px"><div style="font-size:28px;font-weight:700" class="num">' + list.length + '</div><div class="muted tiny">lead cocok' + (exportDesc(f).length ? ' · ' + esc(exportDesc(f).join(' · ')) : '') + '</div></div>' +
+    (exportAllLeads ? '<p class="foot">Memakai semua data lead (' + exportAllLeads.length + ').</p>'
+      : '<p class="foot">' + (old ? '<b style="color:#A55E00">Rentang ini lebih dari 90 hari lalu.</b> ' : '') + 'Lead yang sudah Closing/Lost lebih dari 90 hari belum ikut. ' +
+        '<button class="btn-plain tiny" onclick="exportLoadAll()"' + (f.loadingAll ? ' disabled' : '') + '>' + (f.loadingAll ? 'Memuat…' : 'Muat semua data') + '</button></p>') +
+    '<div class="grid2" style="margin-top:12px"><button class="btn btn-primary" onclick="exportCapture();exportLeadsPdfV2(exportList(sheetState.form), exportDesc(sheetState.form))">Unduh PDF</button>' +
+    '<button class="btn btn-tinted" onclick="exportCapture();exportLeadsCsvV2(exportList(sheetState.form), exportDesc(sheetState.form))">Unduh CSV</button></div>';
 };
 function showStaleLeadsV2() {
   const d = new Date(Date.now() - 45 * 86400000);
   leadFilter = { status: '', project: '', dateType: 'lastUpdated', from: '', to: toDateInputValue(d) };
   leadSeg = 'all'; leadQuery = ''; go('leads');
 }
-function exportLeadsCsvV2() {
-  const list = filteredLeads();
+function exportLeadsCsvV2(list, desc) {
+  list = list || filteredLeads();
   if (!list.length) { alert('Tidak ada data lead yang cocok dengan filter aktif untuk diekspor.'); return; }
   const cell = function (v) { const s = v == null ? '' : String(v); return /[",\n\r]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; };
   const rows = [['Tanggal Masuk', 'Nama Buyer', 'No. WhatsApp', 'Sumber Iklan', 'Proyek', 'Marketing', 'Status', 'Hot Prospek']].concat(list.map(function (l) {
     return [formatDateID(toJsDate(l.createdAt)), l.buyerName || '-', l.waNumber || '-', l.adSource || '-', l.project || '-', l.assignedTo || '-', l.status || '-', l.isHot ? 'Ya' : 'Tidak'];
   }));
   const blob = new Blob(['﻿' + rows.map(function (r) { return r.map(cell).join(','); }).join('\r\n')], { type: 'text/csv;charset=utf-8' });
-  const who = role === 'marketing' ? currentUser.name : (leadMk || 'semua-marketing');
-  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'laporan-lead-' + slugifyFilename(who) + '-' + toDateInputValue(new Date()) + '.csv';
+  const who = role === 'marketing' ? currentUser.name : (desc ? (sheetState && sheetState.form.mk) || 'semua-marketing' : leadMk || 'semua-marketing');
+  const tag = desc && sheetState && sheetState.form.kw ? '-' + slugifyFilename(sheetState.form.kw) : '';
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'laporan-lead' + tag + '-' + slugifyFilename(who) + '-' + toDateInputValue(new Date()) + '.csv';
   document.body.appendChild(a); a.click(); setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
 }
 
@@ -1264,16 +1338,17 @@ function bulkDeleteLeads() {
     if (role === 'marketing') afterKpiChange();
   }).catch(function (e) { alert('Gagal menghapus lead: ' + e.message); });
 }
-function exportLeadsPdfV2() {
-  const list = filteredLeads();
+function exportLeadsPdfV2(list, desc) {
+  list = list || filteredLeads();
   if (!list.length) { alert('Tidak ada data lead yang cocok dengan filter aktif untuk diekspor.'); return; }
   const libs = window.jspdf && window.jspdf.jsPDF && window.jspdf.jsPDF.API && window.jspdf.jsPDF.API.autoTable ? Promise.resolve()
     : loadScript('https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js').then(function () { return loadScript('https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js'); });
   const segLabel = { todo: 'Perlu tindak', all: 'Semua aktif', hot: 'Hot', done: 'Selesai' }[leadSeg] || '';
-  const who = role === 'marketing' ? currentUser.name : (leadMk || 'Semua marketing');
+  const who = role === 'marketing' ? currentUser.name : (desc ? (sheetState && sheetState.form.mk) || 'Semua marketing' : leadMk || 'Semua marketing');
+  const tag = desc && sheetState && sheetState.form.kw ? '-' + slugifyFilename(sheetState.form.kw) : '';
   libs.then(function () {
-    const doc = buildLeadsPdfDoc(list, [role === 'marketing' ? 'Panel Marketing' : 'Panel ' + (role === 'cs' ? 'CS' : 'SPV/Admin'), 'Marketing: ' + who, 'Filter: ' + segLabel + (leadQuery.trim() ? ' · cari "' + leadQuery.trim() + '"' : '')]);
-    if (doc) doc.save('laporan-lead-' + slugifyFilename(who) + '-' + toDateInputValue(new Date()) + '.pdf');
+    const doc = buildLeadsPdfDoc(list, [role === 'marketing' ? 'Panel Marketing' : 'Panel ' + (role === 'cs' ? 'CS' : 'SPV/Admin'), 'Marketing: ' + who].concat(desc ? (desc.length ? desc : ['Semua data']) : ['Filter: ' + segLabel + (leadQuery.trim() ? ' · cari "' + leadQuery.trim() + '"' : '')]));
+    if (doc) doc.save('laporan-lead' + tag + '-' + slugifyFilename(who) + '-' + toDateInputValue(new Date()) + '.pdf');
   }).catch(function (e) { alert(e.message); });
 }
 
