@@ -673,6 +673,57 @@ function updateBell() {
   $('bellDot').classList.toggle('hidden', !(recent && recent.time.getTime() > seen));
 }
 
+// ---------- Target harian (beranda marketing) ----------
+// Target harian = target bulanan / 25 hari kerja (patokan presensi KPI lama). Hari kerja = Senin–Sabtu.
+// "Butuh X per hari" = sisa target bulan ini / sisa hari kerja (termasuk hari ini).
+const KPI_WORKDAYS = 25;
+function workdaysLeft() {
+  const n = new Date(), last = new Date(n.getFullYear(), n.getMonth() + 1, 0).getDate();
+  let c = 0;
+  for (let d = n.getDate(); d <= last; d++) if (new Date(n.getFullYear(), n.getMonth(), d).getDay() !== 0) c++;
+  return Math.max(1, c);
+}
+function todayCounts(r) {
+  const key = kpiDateKey(new Date());
+  let fu = 0, db = 0;
+  marketingLeadsData.forEach(function (l) {
+    if (l.pendingAccept === true) return;
+    if (l.isSelfInput === true && l.createdAt && kpiDateKey(toJsDate(l.createdAt)) === key) db++;
+    // sama dengan aturan KPI: maksimal 1 follow up per lead per hari
+    if ((Array.isArray(l.notes) ? l.notes : []).some(function (n) { return n && n.date && kpiDateKey(toJsDate(n.date)) === key; })) fu++;
+  });
+  const rep = r.reports ? r.reports.some(function (x) { return x.dateKey === key && !x.invalid; }) : null;
+  return { followUp: fu, dbBaru: db, online: rep };
+}
+function todaySection() {
+  if (!myKpi || myKpi.month !== kpiCurrentMonth()) return '';
+  const r = myKpi.rows[0], items = kpiItems(), today = todayCounts(r), left = workdaysLeft();
+  if (!r.reports) kpiFetchRowReports(r, false);
+  const isSunday = new Date().getDay() === 0;
+  const rows = ['followUp', 'dbBaru', 'online'].map(function (key) {
+    const it = items.find(function (x) { return x.key === key; });
+    if (!it) return '';
+    const daily = Math.max(1, Math.round(it.target / KPI_WORKDAYS));
+    const remaining = Math.max(0, it.target - (Number(r.counts[key]) || 0));
+    const need = Math.ceil(remaining / left);
+    let note = '';
+    if (!remaining) note = '<div class="tiny" style="color:#1F7A4D;margin-top:6px">Target bulan ini sudah tercapai</div>';
+    else if (key === 'online') {
+      if (remaining >= left) note = '<div class="tiny" style="color:#A55E00;margin-top:6px">' + (remaining > left ? 'Lapor setiap hari kerja tersisa, maksimal tercapai ' + ((Number(r.counts.online) || 0) + left) + ' dari ' + it.target + ' hari' : 'Butuh lapor setiap hari kerja tersisa') + '</div>';
+    } else if (need > daily) note = '<div class="tiny" style="color:#A55E00;margin-top:6px">Butuh ' + need + ' per hari agar target bulan ini tercapai</div>';
+    if (key === 'online') {
+      const done = today.online;
+      return '<div class="row" style="flex-direction:column;align-items:stretch;padding:13px 16px"><div class="hstack"><div class="t" style="flex:1">Lapor Live / Canvasing</div>' +
+        (done === null ? '<span class="muted tiny">Memuat…</span>' : done ? '<span class="pill p-green">Sudah</span>' : '<button class="pill p-blue" style="border:0" onclick="openSheet(\'report\')">Belum · Lapor</button>') + '</div>' + note + '</div>';
+    }
+    const v = today[key], ok = v >= daily;
+    return '<div class="row" style="flex-direction:column;align-items:stretch;gap:8px;padding:13px 16px"><div class="hstack"><div class="t" style="flex:1">' + esc(it.label) + '</div>' +
+      '<b class="num">' + v + '<span class="muted" style="font-weight:400"> / ' + daily + '</span></b></div>' +
+      '<div class="bar"><i style="width:' + Math.min(100, v / daily * 100) + '%;background:' + (ok ? 'var(--green)' : 'var(--tint)') + '"></i></div>' + note + '</div>';
+  }).join('');
+  return '<div class="section-h"><h2>Hari ini</h2><span class="muted tiny">' + (isSunday ? 'Minggu libur · ' : '') + 'Sisa ' + left + ' hari kerja' + '</span></div><div class="group">' + rows + '</div>';
+}
+
 // ---------- Beranda marketing ----------
 function homeMk() {
   const due = marketingLeadsData.filter(needsAttentionNow).sort(function (a, b) {
@@ -693,7 +744,7 @@ function homeMk() {
       (pend ? '<div class="tiny" style="margin-top:8px;color:#A55E00">' + pend + ' closing menunggu verifikasi</div>' : '') + '</div></div>' +
       '<div class="stat3"><div><b class="num">' + r.counts.dbBaru + '</b><span>Database baru</span></div><div><b class="num">' + r.counts.followUp + '</b><span>Follow up</span></div><div><b class="num">' + r.counts.online + '</b><span>Hari lapor</span></div></div></button>';
   }
-  return pushCard() + pendingCards() +
+  return pushCard() + pendingCards() + todaySection() +
     '<div class="section-h"><h2>KPI ' + KPI_MONTH_NAMES[new Date().getMonth()] + '</h2><button class="link" onclick="go(\'kpi\')">Rincian</button></div>' + kpiCard +
     '<div class="section-h"><h2>Perlu dihubungi</h2><button class="link" onclick="leadSeg=\'todo\';go(\'leads\')">Semua</button></div>' +
     (due.length ? '<div class="group">' + due.slice(0, 6).map(function (l) { return leadRow(l); }).join('') + '</div><p class="foot">' + due.length + ' lead baru / jatuh tempo follow-up.</p>'
