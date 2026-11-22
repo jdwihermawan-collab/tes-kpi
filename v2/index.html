@@ -655,7 +655,7 @@ function homeMk() {
   let kpiCard;
   if (!myKpi || myKpi.month !== kpiCurrentMonth()) kpiCard = '<div class="card loading">Menghitung KPI…</div>';
   else {
-    const r = myKpi.rows[0], sc = rowScore(r).total, pace = pacePct(), pend = (r.counts.itjPending || 0) + (r.counts.spprPending || 0);
+    const r = myKpi.rows[0], sc = rowScore(r).total, pace = pacePct(), pend = countPendingClosings([r]);
     kpiCard = '<button class="card" style="width:100%;text-align:left" onclick="go(\'kpi\')"><div class="hstack" style="gap:18px">' +
       '<div class="ring-wrap" style="width:124px;height:124px">' + ring(sc, 124, 12, sc >= pace ? 'var(--green)' : 'var(--tint)') + '<div class="ring-num"><b>' + fmt(sc) + '</b><span>dari 100</span></div></div>' +
       '<div style="flex:1;min-width:0"><div style="font-weight:600;font-size:16px">' + (sc >= 99.95 ? 'Target tercapai' : sc >= pace ? 'Di atas jalur' : 'Di bawah jalur') + '</div>' +
@@ -739,7 +739,8 @@ function kpiPersonBody(r, month, isSelf) {
       '<div style="text-align:right"><div style="font-weight:600" class="num">' + p.actual + '<span class="muted" style="font-weight:400"> / ' + p.item.target + '</span></div><div class="tiny muted">' + fmt(p.pts) + ' poin</div></div></div>' +
       '<div class="bar"><i style="width:' + (p.ratio * 100) + '%;background:' + (p.ratio >= 1 ? 'var(--green)' : 'var(--tint)') + '"></i></div></div>';
   }).join('');
-  const closings = r.closings.length ? '<div class="group">' + r.closings.map(function (cl) { return closingRow(cl, r.name, !isSelf); }).join('') + '</div>' : '<div class="card empty" style="padding:18px">Belum ada closing bulan ini.</div>';
+  const groups = groupClosings(r.closings);
+  const closings = groups.length ? '<div class="group">' + groups.map(function (g) { return closingRow(g, !isSelf); }).join('') + '</div>' : '<div class="card empty" style="padding:18px">Belum ada closing bulan ini.</div>';
   const reps = !r.reports ? '<div class="card loading" style="padding:18px">Memuat laporan…</div>' : r.reports.length
     ? '<div class="group">' + r.reports.map(function (rep) { return reportRow(rep, r, isSelf); }).join('') + '</div>'
     : '<div class="card empty" style="padding:18px">Belum ada laporan bulan ini.</div>';
@@ -753,16 +754,47 @@ function kpiPersonBody(r, month, isSelf) {
     '<div class="section-h"><h2>Closing</h2></div>' + closings +
     '<div class="section-h"><h2>Laporan Online/Offline</h2><span class="muted tiny">' + r.counts.online + ' hari dihitung</span></div>' + reps;
 }
-function closingRow(cl, name, canAct) {
-  const info = kpiClosingInfo(cl.lead, cl.key);
-  const pill = cl.status === 'approved' ? '<span class="pill p-green">Disetujui</span>' : cl.status === 'rejected' ? '<span class="pill p-red">Ditolak</span>' : '<span class="pill p-orange">Menunggu</span>';
+// ITJ & SPPR dari buyer (lead) yang sama ditampilkan sebagai SATU closing. Perhitungan KPI tetap
+// per tahap (Closing ITJ 15%, Closing SPPR 35%); ini hanya tampilan.
+function groupClosings(closings) {
+  const by = {}, out = [];
+  (closings || []).forEach(function (c) {
+    let g = by[c.lead.id];
+    if (!g) { g = by[c.lead.id] = { lead: c.lead, itj: null, sppr: null, date: c.date }; out.push(g); }
+    g[c.key] = c;
+    if (c.date > g.date) g.date = c.date;
+  });
+  out.forEach(function (g) {
+    // Tahap yang perlu diputuskan SPV: SPPR kalau ada & menunggu, selain itu ITJ yang menunggu.
+    g.pendingKey = g.sppr && g.sppr.status === 'pending' ? 'sppr' : g.itj && g.itj.status === 'pending' ? 'itj' : '';
+    g.mainKey = g.sppr ? 'sppr' : 'itj';
+  });
+  return out.sort(function (a, b) { return b.date - a.date; });
+}
+function countPendingClosings(rows) {
+  return rows.reduce(function (s, r) { return s + groupClosings(r.closings).filter(function (g) { return g.pendingKey; }).length; }, 0);
+}
+function stageChip(c, label) {
+  if (!c) return '';
+  const cls = c.status === 'approved' ? 'p-green' : c.status === 'rejected' ? 'p-red' : 'p-orange';
+  const txt = c.status === 'approved' ? 'disetujui' : c.status === 'rejected' ? 'ditolak' : 'menunggu';
+  return '<span class="pill ' + cls + '">' + label + ' ' + txt + '</span>';
+}
+function closingInfoLine(g) {
+  const info = kpiClosingInfo(g.lead, g.mainKey);
+  return esc(info.project || g.lead.project || '-') + ' · ' + formatDateID(g.date) + (info.unit ? ' · Unit ' + esc(info.unit) : '') + (info.nominal ? ' · ' + esc(formatRupiahText(info.nominal)) : '');
+}
+function closingActions(g, tall) {
+  if (!g.pendingKey || !kpiCanVerify()) return '';
+  const h = tall ? 42 : 38, label = g.pendingKey === 'sppr' ? 'SPPR' : 'ITJ', id = esc(g.lead.id);
+  return '<div class="grid2" style="margin-top:' + (tall ? 14 : 6) + 'px"><button class="btn btn-danger" style="height:' + h + 'px;font-size:15px" onclick="verifyClosing(\'' + id + '\',\'' + g.pendingKey + '\',\'rejected\')">Tolak ' + label + '</button>' +
+    '<button class="btn btn-primary" style="height:' + h + 'px;font-size:15px" onclick="verifyClosing(\'' + id + '\',\'' + g.pendingKey + '\',\'approved\')">Setujui ' + label + '</button></div>';
+}
+function closingRow(g, canAct) {
   return '<div class="row" style="flex-direction:column;align-items:stretch;gap:6px">' +
-    '<div class="hstack"><div class="main"><div class="t">' + esc(kpiStageLabel(cl.key)) + ' · ' + esc(cl.lead.buyerName || '-') + '</div>' +
-    '<div class="s wrap">' + esc(info.project || cl.lead.project || '-') + ' · ' + formatDateID(cl.date) + (info.unit ? ' · Unit ' + esc(info.unit) : '') + (info.nominal ? ' · ' + esc(formatRupiahText(info.nominal)) : '') + '</div></div>' + pill + '</div>' +
-    (canAct && kpiCanVerify() ? '<div class="grid2" style="margin-top:4px">' +
-      (cl.status !== 'rejected' ? '<button class="btn btn-danger" style="height:38px;font-size:15px" onclick="verifyClosing(\'' + esc(cl.lead.id) + '\',\'' + cl.key + '\',\'rejected\')">Tolak</button>' : '<span></span>') +
-      (cl.status !== 'approved' ? '<button class="btn btn-primary" style="height:38px;font-size:15px" onclick="verifyClosing(\'' + esc(cl.lead.id) + '\',\'' + cl.key + '\',\'approved\')">Setujui</button>' : '<span></span>') + '</div>' : '') +
-    '</div>';
+    '<div class="main"><div class="t">' + esc(g.lead.buyerName || '-') + '</div><div class="s wrap">' + closingInfoLine(g) + '</div></div>' +
+    '<div class="hstack" style="gap:6px;flex-wrap:wrap">' + stageChip(g.itj, 'ITJ') + stageChip(g.sppr, 'SPPR') + '</div>' +
+    (canAct ? closingActions(g, false) : '') + '</div>';
 }
 function reportRow(rep, row, isSelf) {
   const d = String(rep.dateKey || '').split('-');
@@ -817,7 +849,7 @@ function homeStaff() {
     const pace = pacePct(), scores = teamKpi.rows.map(function (r) { return rowScore(r).total; });
     const avg = scores.length ? scores.reduce(function (s, v) { return s + v; }, 0) / scores.length : 0;
     const below = scores.filter(function (v) { return v < pace; }).length;
-    const pendV = teamKpi.rows.reduce(function (s, r) { return s + r.closings.filter(function (c) { return c.status === 'pending'; }).length; }, 0);
+    const pendV = countPendingClosings(teamKpi.rows);
     summary = '<div class="card"><div class="hstack"><div class="main"><div class="muted tiny">Rata-rata skor tim · ' + KPI_MONTH_NAMES[new Date().getMonth()] + '</div><div style="font-size:34px;font-weight:700;letter-spacing:-.02em;margin-top:2px" class="num">' + fmt(avg) + '</div><div class="muted tiny">Jalur hari ini ' + fmt(pace) + '</div></div>' +
       '<div class="ring-wrap" style="width:84px;height:84px">' + ring(avg, 84, 10, avg >= pace ? 'var(--green)' : 'var(--tint)') + '</div></div>' +
       '<div class="stat3"><button onclick="go(\'kpi\')"><b>' + below + '</b><span>Di bawah jalur</span></button><button onclick="openSheet(\'verify\')"><b>' + pendV + '</b><span>Perlu verifikasi</span></button><button onclick="openSheet(\'visits\')"><b>' + visits.length + '</b><span>Kunjungan hari ini</span></button></div></div>';
@@ -852,7 +884,7 @@ function kpiTeamScreen() {
   if (!kpiData || kpiData.month !== kpiMonthSel || kpiIsMarketingData()) return head + '<div class="loading">Menghitung KPI tim…</div>';
   const pace = pacePct(), cur = kpiData.month === kpiCurrentMonth();
   const rows = kpiData.rows.map(function (r, i) { return { r: r, i: i, s: rowScore(r).total }; }).sort(function (a, b) { return b.s - a.s; });
-  const pendV = kpiData.rows.reduce(function (s, r) { return s + r.closings.filter(function (c) { return c.status === 'pending'; }).length; }, 0);
+  const pendV = countPendingClosings(kpiData.rows);
   return head +
     (pendV ? '<button class="card" style="margin-top:12px;width:100%;text-align:left;display:flex;align-items:center;gap:12px" onclick="openSheet(\'verify\')"><span class="pill p-orange">' + pendV + '</span><div class="main"><div style="font-weight:600">Menunggu verifikasi</div><div class="muted tiny">Closing baru dihitung setelah disetujui</div></div>' + chev + '</button>' : '') +
     '<div class="section-h"><h2>Peringkat</h2>' + (cur ? '<span class="muted tiny">Jalur hari ini ' + fmt(pace) + '</span>' : '') + '</div>' +
@@ -1060,14 +1092,13 @@ SHEETS.verify = function () {
   const src = role === 'staff' ? (kpiData && !kpiIsMarketingData() ? kpiData : teamKpi) : null;
   if (!src) { loadTeamKpi(false); return sheetHead('Verifikasi Closing') + '<div class="loading">Memuat…</div>'; }
   const pend = [];
-  src.rows.forEach(function (r) { r.closings.forEach(function (c) { if (c.status === 'pending') pend.push({ c: c, r: r }); }); });
+  src.rows.forEach(function (r) { groupClosings(r.closings).forEach(function (g) { if (g.pendingKey) pend.push({ g: g, r: r }); }); });
   return sheetHead('Verifikasi Closing') + (pend.length ? pend.map(function (x) {
-    const info = kpiClosingInfo(x.c.lead, x.c.key);
-    return '<div class="card" style="margin-bottom:10px"><div class="hstack"><span class="pill p-green">' + esc(kpiStageLabel(x.c.key)) + '</span><span class="spacer"></span><span class="tiny muted">' + esc(x.r.name) + '</span></div>' +
-      '<div style="font-size:17px;font-weight:600;margin-top:10px">' + esc(x.c.lead.buyerName || '-') + '</div><div class="muted tiny" style="margin-top:3px">' + esc(info.project || x.c.lead.project || '-') + ' · ' + formatDateID(x.c.date) +
-      (info.unit ? ' · Unit ' + esc(info.unit) : '') + (info.nominal ? ' · ' + esc(formatRupiahText(info.nominal)) : '') + '</div>' +
-      '<div class="grid2" style="margin-top:14px"><button class="btn btn-danger" style="height:42px" onclick="verifyClosing(\'' + esc(x.c.lead.id) + '\',\'' + x.c.key + '\',\'rejected\')">Tolak</button><button class="btn btn-primary" style="height:42px" onclick="verifyClosing(\'' + esc(x.c.lead.id) + '\',\'' + x.c.key + '\',\'approved\')">Setujui</button></div></div>';
-  }).join('') : '<div class="card empty">Tidak ada closing yang menunggu verifikasi.</div>') + '<p class="foot">Closing baru dihitung di KPI setelah disetujui. Menyetujui SPPR ikut menyetujui ITJ lead yang sama.</p>';
+    return '<div class="card" style="margin-bottom:10px"><div class="hstack" style="gap:6px;flex-wrap:wrap">' + stageChip(x.g.itj, 'ITJ') + stageChip(x.g.sppr, 'SPPR') + '<span class="spacer"></span><span class="tiny muted">' + esc(x.r.name) + '</span></div>' +
+      '<div style="font-size:17px;font-weight:600;margin-top:10px">' + esc(x.g.lead.buyerName || '-') + '</div><div class="muted tiny" style="margin-top:3px">' + closingInfoLine(x.g) + '</div>' +
+      closingActions(x.g, true) + '</div>';
+  }).join('') : '<div class="card empty">Tidak ada closing yang menunggu verifikasi.</div>') +
+    '<p class="foot">Satu kartu per buyer. Menyetujui SPPR otomatis ikut menyetujui ITJ buyer yang sama. Closing baru dihitung di KPI setelah disetujui.</p>';
 };
 
 SHEETS.visits = function () {
