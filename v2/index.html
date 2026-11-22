@@ -293,7 +293,7 @@ function sheetHead(title, rightHtml, leftLabel) {
   return '<div class="sheet-head"><div class="side"><button class="btn-plain" onclick="closeSheet()">' + (leftLabel || 'Tutup') + '</button></div><h3>' + title + '</h3><div class="side r">' + (rightHtml || '') + '</div></div>';
 }
 // Sheet yang berisi formulir tidak di-render ulang otomatis saat data berubah (isian tidak hilang).
-function sheetIsForm() { return sheetState && ['update', 'newLead', 'report', 'pdf'].indexOf(sheetState.kind) !== -1; }
+function sheetIsForm() { return sheetState && ['update', 'newLead', 'report', 'pdf', 'broadcast', 'waRemind'].indexOf(sheetState.kind) !== -1; }
 
 // =====================================================================
 // Login & sesi
@@ -1005,11 +1005,11 @@ function moreScreen() {
   const pushOn = !pushUnsupportedReason() && 'Notification' in window && Notification.permission === 'granted';
   const old = function (t, s) { return '<a class="row" href="/"><div class="main"><div class="t">' + t + '</div><div class="s">' + s + '</div></div>' + chev + '</a>'; };
   const staffLinks = role === 'staff' ? '<div class="section-h"><h2>Fitur lanjutan</h2></div><div class="group">' +
-    old('Kirim Notif', 'Peringatan / pengumuman ke marketing') +
-    old('Kirim Pengingat WA', 'Rekap follow-up harian per grup') +
+    '<button class="row" onclick="openSheet(\'broadcast\')"><div class="main"><div class="t">Kirim Notif</div><div class="s">Peringatan / pengumuman ke HP marketing</div></div>' + chev + '</button>' +
+    '<button class="row" onclick="openSheet(\'waRemind\')"><div class="main"><div class="t">Kirim Pengingat WA</div><div class="s">Rekap lead jatuh tempo per marketing</div></div>' + chev + '</button>' +
     (currentUser.role === 'Admin' ? old('Riwayat Input', 'Lead umum, iklan & spam dari CS') : '') +
     (currentUser.role === 'SuperAdmin' ? old('Kelola Akun & Proyek', 'Tambah / ubah akun, daftar proyek, reset data') + old('Atur Target KPI', 'Target & bobot 7 indikator') + old('Tes Push', 'Uji notifikasi ke HP') : '') +
-    '</div><p class="foot">Dibuka di tampilan lama (lebih nyaman di laptop). Login yang sama.</p>' : '';
+    '</div><p class="foot">Kirim Notif & Pengingat WA terbuka di sini. Fitur lainnya dibuka di tampilan lama (lebih nyaman di laptop), login yang sama.</p>' : '';
   return '<div class="group"><div class="row ind"><div class="avatar" style="background:var(--tint)">' + esc(initials(currentUser.name)) + '</div><div class="main"><div class="t">' + esc(currentUser.name) + '</div><div class="s">' + esc(roleLabel) + ' · ' + esc(String(currentUser.email || '').split('@')[0]) + '</div></div></div></div>' +
     '<div class="section-h"><h2>Pengaturan</h2></div><div class="group">' +
       '<div class="row"><div class="main"><div class="t">Notifikasi push</div><div class="s">' + (pushOn ? 'Aktif di perangkat ini' : esc(pushUnsupportedReason() || 'Belum aktif')) + '</div></div>' + (pushOn ? '<span class="pill p-green">Aktif</span>' : (pushUnsupportedReason() ? '' : '<button class="btn-plain" onclick="enablePush()">Aktifkan</button>')) + '</div>' +
@@ -1023,6 +1023,199 @@ function moreScreen() {
 // Sheets
 // =====================================================================
 const SHEETS = {};
+
+// =====================================================================
+// SPV/Manager & Super Admin: Kirim Notif (push) — sama dengan tampilan lama, server api/broadcast.js
+// =====================================================================
+const BROADCAST_TEMPLATES = [
+  { label: 'Pengingat sore', target: 'due', title: 'Pengingat Follow-Up Sore', body: 'Halo {nama}, masih ada {jumlah} lead yang belum di-follow up hari ini. Yuk diselesaikan sebelum pulang ya!' },
+  { label: 'Pengumuman', target: 'marketing', title: 'Pengumuman', body: '' },
+  { label: 'Briefing / rapat', target: 'marketing', title: 'Briefing Tim', body: 'Halo {nama}, ada briefing tim hari ini jam ... di kantor. Mohon hadir tepat waktu ya.' },
+  { label: 'Semangat closing', target: 'marketing', title: 'Semangat Closing!', body: 'Halo {nama}, tetap semangat follow up buyer hari ini. Satu chat lagi bisa jadi closing berikutnya!' }
+];
+const BROADCAST_TARGETS = [
+  ['due', 'Marketing yang belum follow-up hari ini'], ['marketing', 'Semua marketing'], ['groupA', 'Marketing Grup A'],
+  ['groupB', 'Marketing Grup B'], ['pick', 'Pilih marketing…'], ['team', 'Semua tim (marketing + CS)']
+];
+function canBroadcastV2() { return !!currentUser && (currentUser.role === 'Admin' || currentUser.role === 'SuperAdmin'); }
+function broadcastApiV2(payload) {
+  return Promise.resolve().then(function () {
+    if (!auth.currentUser) throw new Error('Sesi login habis. Silakan keluar lalu masuk lagi.');
+    return auth.currentUser.getIdToken();
+  }).then(function (idToken) {
+    return fetch('/api/broadcast', { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + idToken }, body: JSON.stringify(payload) });
+  }).then(function (r) {
+    return r.text().then(function (txt) {
+      let data = {};
+      try { data = JSON.parse(txt); } catch (e) {}
+      if (!r.ok) throw new Error(data.error || (r.status === 404 ? 'Server notifikasi (api/broadcast) belum ter-deploy di Vercel.' : 'Server merespons ' + r.status));
+      return data;
+    });
+  });
+}
+function bcDueCounts() {
+  const c = {};
+  allLeadsData.forEach(function (l) {
+    if (!l.assignedTo || l.pendingAccept === true || !needsAttentionNow(l)) return;
+    c[l.assignedTo] = (c[l.assignedTo] || 0) + 1;
+  });
+  return c;
+}
+function bcPreviewNames(f) {
+  const mk = activeMarketingUsers(), names = function (list) { return list.map(function (u) { return u.name; }); };
+  if (f.target === 'due') { const c = bcDueCounts(); return mk.filter(function (u) { return c[u.name] > 0; }).map(function (u) { return u.name + ' (' + c[u.name] + ')'; }); }
+  if (f.target === 'marketing') return names(mk);
+  if (f.target === 'groupA') return names(mk.filter(function (u) { return u.group !== 'B'; }));
+  if (f.target === 'groupB') return names(mk.filter(function (u) { return u.group === 'B'; }));
+  if (f.target === 'pick') return Object.keys(f.picked || {}).filter(function (n) { return f.picked[n]; });
+  if (f.target === 'team') return usersData.filter(function (u) { return isActiveUser(u) && u.name && (u.role === 'Marketing' || u.role === 'CS'); }).map(function (u) { return u.name; }).sort();
+  return [];
+}
+function bcCapture() {
+  const f = sheetState.form;
+  if ($('bcTitle')) f.title = $('bcTitle').value;
+  if ($('bcBody')) f.body = $('bcBody').value;
+}
+function bcApplyTemplate(i) {
+  const tp = BROADCAST_TEMPLATES[i], f = sheetState.form;
+  if (!tp) return;
+  f.target = tp.target; f.title = tp.title; f.body = tp.body; f.result = null;
+  renderSheet();
+}
+function bcSetTarget(v) { bcCapture(); sheetState.form.target = v; sheetState.form.result = null; renderSheet(); }
+function bcTogglePick(name) { bcCapture(); const f = sheetState.form; f.picked = f.picked || {}; f.picked[name] = !f.picked[name]; renderSheet(); }
+function bcLoadHistory() {
+  const f = sheetState && sheetState.form;
+  if (!f || f.historyLoading) return;
+  f.historyLoading = true;
+  broadcastApiV2({ action: 'history' }).then(function (d) { f.history = d.items || []; f.historyErr = ''; })
+    .catch(function (e) { f.history = []; f.historyErr = e.message; })
+    .finally(function () { f.historyLoading = false; if (sheetState && sheetState.form === f) { bcCapture(); renderSheet(); } });
+}
+SHEETS.broadcast = function () {
+  if (!canBroadcastV2()) return sheetHead('Kirim Notif') + '<div class="card empty">Hanya untuk SPV/Manager dan Super Admin.</div>';
+  const f = sheetState.form;
+  if (!f.init) { f.init = true; f.target = BROADCAST_TEMPLATES[0].target; f.title = BROADCAST_TEMPLATES[0].title; f.body = BROADCAST_TEMPLATES[0].body; f.picked = {}; bcLoadHistory(); }
+  const names = bcPreviewNames(f);
+  const preview = names.length ? (f.target === 'due' ? 'Belum follow-up (jumlah lead): ' : 'Penerima (' + names.length + '): ') + names.join(', ')
+    : f.target === 'due' ? 'Saat ini semua marketing sudah follow-up hari ini.' : f.target === 'pick' ? 'Centang marketing yang mau dikirimi.' : 'Tidak ada penerima.';
+  const pick = f.target === 'pick' ? '<div class="group" style="margin-top:10px">' + activeMarketingUsers().map(function (u) {
+    const on = !!(f.picked && f.picked[u.name]);
+    return '<button class="row" onclick="bcTogglePick(\'' + esc(u.name).replace(/'/g, "\\'") + '\')"><div class="main"><div class="t">' + esc(u.name) + '</div></div>' + (on ? ICON.check : '<span style="width:20px"></span>') + '</button>';
+  }).join('') + '</div>' : '';
+  const res = f.result ? '<p class="small" style="margin-top:12px;line-height:1.45;color:' + (f.result.ok ? '#1F7A4D' : 'var(--red)') + '">' + esc(f.result.text) + '</p>' : '';
+  const hist = f.historyLoading && !f.history ? '<div class="card loading" style="padding:18px">Memuat riwayat…</div>'
+    : f.historyErr ? '<div class="card empty" style="padding:18px;color:var(--red)">Gagal memuat riwayat: ' + esc(f.historyErr) + '</div>'
+    : f.history && f.history.length ? '<div class="group">' + f.history.map(function (b) {
+      const when = b.createdAt ? new Date(b.createdAt).toLocaleString('id-ID', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : '';
+      return '<div class="row" style="align-items:flex-start"><div class="main"><div class="hstack"><div class="t" style="flex:1">' + esc(b.title) + '</div><span class="muted tiny">' + esc(when) + '</span></div>' +
+        '<div class="s wrap">' + esc(b.senderName || '-') + ' · ' + esc(b.targetLabel || '-') + ' · ' + (b.recipientCount || 0) + ' penerima</div>' +
+        '<div class="s wrap" style="color:var(--label);margin-top:4px">' + esc(b.body) + '</div></div></div>';
+    }).join('') + '</div>' : '<div class="card empty" style="padding:18px">Belum ada notif yang dikirim.</div>';
+  return sheetHead('Kirim Notif') +
+    '<p class="muted small" style="margin:0 2px 12px;line-height:1.45">Push notification ke HP tim. Hanya sampai ke yang sudah menekan "Aktifkan Notifikasi".</p>' +
+    '<div class="hstack" style="gap:8px;flex-wrap:wrap">' + BROADCAST_TEMPLATES.map(function (tp, i) {
+      return '<button class="pill p-blue" style="border:0;font-size:13px;padding:6px 12px" onclick="bcApplyTemplate(' + i + ')">' + esc(tp.label) + '</button>';
+    }).join('') + '</div>' +
+    '<label class="field" style="margin-top:14px"><span>Kirim ke</span><select id="bcTarget" onchange="bcSetTarget(this.value)">' + BROADCAST_TARGETS.map(function (x) {
+      return '<option value="' + x[0] + '"' + (x[0] === f.target ? ' selected' : '') + '>' + x[1] + '</option>';
+    }).join('') + '</select></label>' + pick +
+    '<p class="foot" style="margin-top:8px">' + esc(preview) + '</p>' +
+    '<label class="field" style="margin-top:10px"><span>Judul</span><input id="bcTitle" maxlength="80" value="' + esc(f.title || '') + '"></label>' +
+    '<label class="field"><span>Isi pesan</span><textarea id="bcBody" rows="4" maxlength="500">' + esc(f.body || '') + '</textarea></label>' +
+    '<p class="foot">{nama} dan {jumlah} (jumlah lead yang belum di-follow up) otomatis diganti untuk tiap penerima.</p>' + res +
+    '<button class="btn btn-primary" style="margin-top:14px" id="bcSend" onclick="bcSend()">Kirim Notifikasi</button>' +
+    '<div class="section-h"><h2>Riwayat kiriman</h2></div>' + hist;
+};
+function bcSend() {
+  if (!canBroadcastV2()) return;
+  bcCapture();
+  const f = sheetState.form, title = String(f.title || '').trim(), body = String(f.body || '').trim();
+  const names = f.target === 'pick' ? bcPreviewNames(f) : [];
+  const label = (BROADCAST_TARGETS.find(function (x) { return x[0] === f.target; }) || [0, ''])[1].replace('…', '').toLowerCase();
+  if (!title || !body) { f.result = { ok: false, text: 'Judul dan isi pesan wajib diisi.' }; renderSheet(); return; }
+  if (f.target === 'pick' && !names.length) { f.result = { ok: false, text: 'Centang minimal satu marketing.' }; renderSheet(); return; }
+  if (!confirm('Kirim notifikasi "' + title + '" ke ' + label + '?')) return;
+  const btn = $('bcSend'); btn.disabled = true; btn.textContent = 'Mengirim…';
+  broadcastApiV2({ action: 'send', target: f.target, names: names, title: title, body: body }).then(function (d) {
+    if (!d.recipients) { f.result = { ok: false, text: d.info || 'Tidak ada penerima.' }; return; }
+    f.result = { ok: !!d.sent, text: 'Terkirim ke ' + d.recipients + ' orang (' + d.sent + ' dari ' + d.devices + ' perangkat).' +
+      (d.noDevice && d.noDevice.length ? ' Belum mengaktifkan notifikasi: ' + d.noDevice.join(', ') + '.' : '') };
+    f.history = null; bcLoadHistory();
+  }).catch(function (e) { f.result = { ok: false, text: 'Gagal: ' + e.message }; })
+    .finally(function () { if (sheetState && sheetState.form === f) renderSheet(); });
+}
+
+// =====================================================================
+// SPV/Manager & Super Admin: Kirim Pengingat WA — rekap lead jatuh tempo per marketing.
+// Aturan & isi pesan sama dengan tampilan lama; setiap kirim dicatat di reminderLogs.
+// =====================================================================
+function waDueFor(name) {
+  return allLeadsData.filter(function (l) {
+    if (l.assignedTo !== name || l.pendingAccept === true) return false;
+    if (CLOSED_STATUSES.indexOf(l.status) !== -1) return false;
+    return daysDiffDateOnly(toJsDate(l.nextFollowUpDate || l.lastUpdated || l.createdAt), new Date()) <= 0;
+  });
+}
+function waRekapMessage(name, leads) {
+  const link = APP.crmUrl ? String(APP.crmUrl).replace(/\/+$/, '') + '/v2/' : '';
+  if (!leads.length) return 'Halo ' + name + ', untuk saat ini belum ada jadwal follow-up yang jatuh tempo hari ini di ' + APP.groupName + '. Terima kasih!';
+  const lines = leads.map(function (l, i) { return (i + 1) + '. ' + (l.buyerName || '-') + ' - Proyek: ' + (l.project || '-') + ' - Status: ' + (l.status || '-') + ' - No WA: ' + (l.waNumber || '-'); });
+  return 'Halo ' + name + ', berikut adalah daftar lead yang wajib di-follow-up hari ini di ' + APP.groupName + ':\n\n' + lines.join('\n') +
+    '\n\nMohon segera ditindaklanjuti ya. Setelah di-follow-up, jangan lupa update status di CRM' + (link ? ':\n' + link : '.') + '\n\nTerima kasih!';
+}
+function waLoadTodayLogs() {
+  const f = sheetState && sheetState.form;
+  if (!f) return;
+  const since = new Date(); since.setHours(0, 0, 0, 0);
+  f.logsLoading = true;
+  db.collection('reminderLogs').where('createdAt', '>=', since).orderBy('createdAt', 'desc').get().then(function (s) {
+    f.logs = s.docs.map(function (d) { return Object.assign({ id: d.id }, d.data({ serverTimestamps: 'estimate' })); });
+  }).catch(function (e) { console.error(e); f.logs = []; })
+    .finally(function () { f.logsLoading = false; if (sheetState && sheetState.form === f) renderSheet(); });
+}
+function waTodayFor(f, name) { return (f.logs || []).filter(function (r) { return r.marketingName === name; }); }
+function waSetGroup(g) { sheetState.form.group = g; sheetState.form.confirm = null; renderSheet(); }
+SHEETS.waRemind = function () {
+  if (!canBroadcastV2()) return sheetHead('Kirim Pengingat WA') + '<div class="card empty">Hanya untuk SPV/Manager dan Super Admin.</div>';
+  const f = sheetState.form;
+  if (!f.init) { f.init = true; f.group = 'A'; f.session = currentUser.uid + '-' + Date.now(); waLoadTodayLogs(); }
+  const mk = activeMarketingUsers(), hasB = mk.some(function (u) { return u.group === 'B'; });
+  const list = mk.filter(function (u) { return !hasB || (f.group === 'B' ? u.group === 'B' : u.group !== 'B'); });
+  const rows = list.map(function (u) {
+    const name = u.name, safe = esc(name).replace(/'/g, "\\'"), count = waDueFor(name).length;
+    const numOk = validateWaNumber(u.waNumber || '') === '', todays = waTodayFor(f, name), sent = todays.length > 0;
+    const info = !numOk ? 'Nomor WA belum valid' : count ? count + ' lead jatuh tempo' : 'Tidak ada lead jatuh tempo';
+    const warn = sent ? '<div class="s wrap" style="color:#A55E00;margin-top:2px">Sudah diingatkan ' + esc(todays[0].senderName || '-') + ' pukul ' + formatTimeID(toJsDate(todays[0].createdAt)) + (todays.length > 1 ? ' · ' + todays.length + 'x hari ini' : '') + '</div>' : '';
+    if (f.confirm === name && sent && numOk) {
+      return '<div class="row" style="flex-direction:column;align-items:stretch;gap:8px;background:var(--orange-soft)"><div class="main"><div class="t">' + esc(name) + '</div>' + warn + '<div class="t" style="margin-top:6px;font-size:15px">Yakin kirim lagi?</div></div>' +
+        '<div class="grid2"><button class="btn btn-tinted" style="height:38px;font-size:15px" onclick="sheetState.form.confirm=null;renderSheet()">Batal</button><button class="btn btn-primary" style="height:38px;font-size:15px" onclick="waSend(\'' + safe + '\',true)">Ya, kirim lagi</button></div></div>';
+    }
+    return '<div class="row" style="align-items:flex-start"><div class="avatar" style="background:' + colorFor(name) + '">' + esc(initials(name)) + '</div>' +
+      '<div class="main"><div class="t">' + esc(name) + (sent ? ' <span style="color:var(--green)">✓</span>' : '') + '</div><div class="s">' + info + '</div>' + warn + '</div>' +
+      '<button class="btn ' + (sent ? 'btn-tinted' : 'btn-primary') + '" style="width:auto;height:34px;padding:0 14px;font-size:14px;align-self:center"' + (numOk ? '' : ' disabled') + ' onclick="waSend(\'' + safe + '\')">' + (sent ? 'Kirim lagi' : 'Kirim') + '</button></div>';
+  }).join('');
+  return sheetHead('Kirim Pengingat WA') +
+    '<p class="muted small" style="margin:0 2px 4px;line-height:1.45">Tombol Kirim membuka WhatsApp berisi daftar lead jatuh tempo hari ini milik marketing tersebut.</p>' +
+    (hasB ? '<div class="seg"><button class="' + (f.group !== 'B' ? 'on' : '') + '" onclick="waSetGroup(\'A\')">Grup A</button><button class="' + (f.group === 'B' ? 'on' : '') + '" onclick="waSetGroup(\'B\')">Grup B</button></div>' : '') +
+    (f.logsLoading && !f.logs ? '<div class="card loading" style="margin-top:12px;padding:18px">Memuat…</div>'
+      : list.length ? '<div class="group" style="margin-top:12px">' + rows + '</div>' : '<div class="card empty" style="margin-top:12px">Belum ada marketing aktif.</div>') +
+    '<p class="foot">Tanda ✓ = sudah diingatkan hari ini (oleh akun mana pun). Nomor WA marketing diatur di Kelola Akun.</p>';
+};
+function waSend(name, confirmed) {
+  const f = sheetState.form, u = activeMarketingUsers().find(function (x) { return x.name === name; });
+  if (!u || validateWaNumber(u.waNumber || '')) return;
+  if (!confirmed && waTodayFor(f, name).length) { f.confirm = name; renderSheet(); return; }
+  f.confirm = null;
+  const leads = waDueFor(name);
+  window.open('https://wa.me/' + toWaDigits(u.waNumber) + '?text=' + encodeURIComponent(waRekapMessage(name, leads)), '_blank');
+  const log = { senderUid: currentUser.uid, senderName: currentUser.name, senderEmail: currentUser.email, senderRole: currentUser.role,
+    marketingName: name, groupKey: u.group === 'B' ? 'group2' : 'group1', leadCount: leads.length, sessionId: f.session || '', createdAt: FieldValue.serverTimestamp() };
+  f.logs = [Object.assign({}, log, { createdAt: new Date() })].concat(f.logs || []);
+  renderSheet();
+  db.collection('reminderLogs').add(log).catch(function (e) { toast('Gagal mencatat log pengingat', e.message); });
+}
+
 
 SHEETS.lead = function (id) {
   const l = findLeadById(id);
