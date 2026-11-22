@@ -9,7 +9,7 @@
 //            'spam'           = nomor spam dari CS
 //            'reminderLogs'   = log pengingat WA ke marketing
 //            'activity'       = aktivitas marketing (login / update)
-//            'kpi'            = laporan KPI Live TikTok / Canvasing (kpiReports/{uid}/kpiItems)
+//            'kpi'            = laporan KPI Live TikTok / Canvasing (kpiReports/{uid}/kpiItems) + rekap tren (kpiHistory)
 //            'broadcasts'     = riwayat Kirim Notif + riwayat lonceng (notifLogs)
 //            'rotation'       = antrean giliran rotasi lead dimulai ulang
 // Akun (users, credentials, pushTokens) dan pengaturan (daftar proyek dsb.) TIDAK pernah dihapus.
@@ -35,7 +35,7 @@ const PAGE = 400;
 function queriesFor(item) {
   const db = L.db();
   if (item === 'kpi') {
-    return [{ q: db.collectionGroup('kpiItems'), counted: true }];
+    return [{ q: db.collectionGroup('kpiItems'), counted: true }, { q: db.collection('kpiHistory'), counted: false }];
   }
   if (item === 'activity') {
     return [{ q: db.collectionGroup('logs'), counted: true }, { q: db.collection('marketingActivity'), counted: false }];

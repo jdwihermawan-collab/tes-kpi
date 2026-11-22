@@ -14,6 +14,8 @@
 //     melapor Live TikTok / Canvasing.
 //  7. KPI: tanggal 20 jam 10:00 WIB (sekali sebulan) -> marketing yang skornya di bawah jalur diberi
 //     tahu skor & indikator yang paling perlu dikejar; SPV/Manager dapat ringkasannya.
+//  8. KPI: tanggal 3 jam 02:00 WIB -> skor bulan lalu tiap marketing disimpan ke kpiHistory/{uid}
+//     (dipakai grafik tren 6 bulan; tanggal 3 supaya SPV sempat memverifikasi closing akhir bulan).
 //
 // Hemat kuota Firestore: data akun (koleksi users) hanya dibaca kalau ada lead yang
 // menunggu diterima, atau saat pengingat harian benar-benar dikirim. Kalau tidak ada
@@ -25,6 +27,7 @@
 //   VISIT_REMINDER_HOUR (opsional) = jam pengingat kunjungan WIB, default 8
 //   REPORT_REMINDER_HOUR (opsional) = jam pengingat laporan Live/Canvasing WIB, default 16
 //   KPI_PACE_DAY / KPI_PACE_HOUR (opsional) = tanggal & jam pengingat KPI WIB, default 20 & 10
+//   KPI_LOCK_DAY / KPI_LOCK_HOUR (opsional) = tanggal & jam simpan rekap bulan lalu WIB, default 3 & 2
 // ============================================================
 const L = require('./_lib');
 const K = require('./_kpi');
@@ -284,6 +287,41 @@ async function kpiPaceReminder(loadUsers, link, now, out) {
   }
 }
 
+// 8. Simpan rekap KPI bulan lalu untuk grafik tren (sekali sebulan).
+async function kpiMonthLock(loadUsers, now, out) {
+  const day = Number(process.env.KPI_LOCK_DAY || 3);
+  const hour = Number(process.env.KPI_LOCK_HOUR || 2);
+  const t = L.wibParts(now);
+  if (Number(t.dateKey.slice(8, 10)) !== day || t.hour !== hour) return;
+  const y = Number(t.dateKey.slice(0, 4)), m = Number(t.dateKey.slice(5, 7));
+  const prevYm = m === 1 ? (y - 1) + '-12' : y + '-' + String(m - 1).padStart(2, '0');
+  if (!(await claimDaily('kpiLock', prevYm))) return;
+  try {
+    await saveMonthLock(loadUsers, prevYm, out);
+  } catch (e) {
+    // Gagal: lepas penandanya supaya cron menit berikutnya mencoba lagi.
+    await L.db().collection('settings').doc('kpiLock').set({ lastKey: '' }, { merge: true }).catch(function () {});
+    throw e;
+  }
+}
+
+async function saveMonthLock(loadUsers, prevYm, out) {
+  const users = await loadUsers();
+  const marketing = users.filter(function (x) { return x.role === 'Marketing'; });
+  if (!marketing.length) return;
+  const res = await K.monthKpi(prevYm, marketing);
+  const batch = L.db().batch();
+  res.rows.forEach(function (r) {
+    const parts = {};
+    r.score.parts.forEach(function (p) { parts[p.item.key] = p.actual; });
+    const months = {};
+    months[prevYm] = { total: Math.round(r.score.total * 100) / 100, parts: parts, lockedAt: L.FieldValue.serverTimestamp(), lockedBy: 'otomatis' };
+    batch.set(L.db().collection('kpiHistory').doc(r.user.uid), { name: r.user.name, months: months, updatedAt: L.FieldValue.serverTimestamp() }, { merge: true });
+  });
+  await batch.commit();
+  out.kpiLocked = res.rows.length;
+}
+
 module.exports = async function handler(req, res) {
   const secret = process.env.CRON_SECRET;
   if (!secret) return res.status(500).json({ error: 'CRON_SECRET belum diisi di Vercel.' });
@@ -294,7 +332,7 @@ module.exports = async function handler(req, res) {
 
   const now = Date.now();
   const link = L.baseUrl(req);
-  const out = { pending: 0, created: 0, warned: 0, reassigned: 0, exhausted: 0, escalated: 0, daily: 0, visits: 0, reportReminders: 0, kpiPace: 0, errors: [] };
+  const out = { pending: 0, created: 0, warned: 0, reassigned: 0, exhausted: 0, escalated: 0, daily: 0, visits: 0, reportReminders: 0, kpiPace: 0, kpiLocked: 0, errors: [] };
 
   // Data akun dibaca sekali saja per panggilan, dan hanya kalau memang dibutuhkan.
   let usersPromise = null;
@@ -325,6 +363,9 @@ module.exports = async function handler(req, res) {
 
   try { await kpiPaceReminder(loadUsers, link, now, out); }
   catch (e) { out.errors.push('kpiPace: ' + e.message); }
+
+  try { await kpiMonthLock(loadUsers, now, out); }
+  catch (e) { out.errors.push('kpiLock: ' + e.message); }
 
   return res.json(out);
 };

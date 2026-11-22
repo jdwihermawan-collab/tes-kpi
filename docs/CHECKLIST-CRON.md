@@ -23,6 +23,7 @@ Tanpa cron, fitur berikut **TIDAK jalan**:
 | 6 | Ringkasan follow-up hari ini | 09.00 WIB | Marketing |
 | 7 | **KPI:** belum lapor Live TikTok / Canvasing hari ini | 16.00 WIB, Senin–Sabtu | Marketing yang belum lapor |
 | 8 | **KPI:** skor di bawah jalur | tanggal 20, 10.00 WIB (sekali sebulan) | Marketing + ringkasan ke SPV/Manager |
+| 9 | **KPI:** simpan rekap bulan lalu untuk grafik tren 6 bulan | tanggal 3, 02.00 WIB (sekali sebulan) | — (tanpa notifikasi) |
 
 Yang **tidak** butuh cron (sudah jalan): push lead baru dari CS, lead diterima, janji kunjungan
 dibuat/dibatalkan, Kirim Notif, closing perlu verifikasi, closing disetujui/ditolak, laporan
@@ -44,6 +45,8 @@ tidak valid.
 | `REPORT_REMINDER_HOUR` | Opsional | Jam pengingat laporan Live/Canvasing, default `16` | ☐ |
 | `KPI_PACE_DAY` | Opsional | Tanggal pengingat KPI, default `20` | ☐ |
 | `KPI_PACE_HOUR` | Opsional | Jam pengingat KPI, default `10` | ☐ |
+| `KPI_LOCK_DAY` | Opsional | Tanggal simpan rekap bulan lalu (grafik tren), default `3` | ☐ |
+| `KPI_LOCK_HOUR` | Opsional | Jam simpan rekap bulan lalu, default `2` | ☐ |
 
 Semua jam memakai **WIB**. Setelah menambah/mengubah variabel → **Redeploy**.
 

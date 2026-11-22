@@ -3537,6 +3537,7 @@
     }
 
     function stopKpiHome() {
+      kpiTrendCache = {};
       kpiCache = {};   // logout / ganti akun: buang data KPI yang tersimpan sementara
       kpiHome = { seq: kpiHome.seq + 1, month: '', leads: null, reports: null, error: '' };
       const el = document.getElementById('kpiGaugeCard');
@@ -3660,6 +3661,180 @@
           '<button type="button" onclick="openKpiModal()" class="border border-[var(--line)] font-semibold text-xs py-2.5 rounded-lg">Rincian KPI</button>' +
         '</div>'
       );
+    }
+
+    // ------------------------------------------------------------
+    // Tren KPI 6 bulan (per marketing).
+    // Bulan yang sudah lewat diambil dari rekap tersimpan kpiHistory/{uid}: SATU dokumen per
+    // marketing berisi { months: { 'yyyy-mm': { total, parts, lockedAt, lockedBy } } }, jadi
+    // membuka grafik cukup 1 read. Rekap disimpan otomatis oleh server (cron, tanggal 3) atau
+    // manual lewat tombol "Simpan ke grafik tren" (SPV/Super Admin). Bulan berjalan memakai
+    // skor live yang sedang tampil (titik berongga + garis putus-putus = belum final).
+    // ------------------------------------------------------------
+    const KPI_TREND_MONTHS = 6;
+    const KPI_TREND_COLOR = '#3a52b8';
+    const KPI_MONTH_SHORT = ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agu', 'Sep', 'Okt', 'Nov', 'Des'];
+    let kpiTrendCache = {};   // uid -> { months, at, loading, error }
+    let kpiTrendPoints = [];  // titik yang sedang tampil (untuk tooltip)
+
+    function kpiHistoryRef(uid) { return db.collection('kpiHistory').doc(uid); }
+
+    function kpiTrendMonthList() {
+      const now = new Date();
+      const out = [];
+      for (let i = KPI_TREND_MONTHS - 1; i >= 0; i--) out.push(kpiDateKey(new Date(now.getFullYear(), now.getMonth() - i, 1)).slice(0, 7));
+      return out;
+    }
+
+    function kpiMonthShort(ym) { return KPI_MONTH_SHORT[Number(ym.slice(5, 7)) - 1] || ym; }
+
+    function ensureKpiTrend(uid) {
+      if (!uid) return;
+      const c = kpiTrendCache[uid];
+      if (c && (c.loading || Date.now() - c.at < KPI_CACHE_MS)) { renderKpiTrend(uid); return; }
+      kpiTrendCache[uid] = { loading: true, months: {}, at: 0 };
+      renderKpiTrend(uid);
+      kpiHistoryRef(uid).get().then(function (s) {
+        kpiTrendCache[uid] = { months: s.exists ? (s.data().months || {}) : {}, at: Date.now() };
+      }).catch(function (err) {
+        console.error('Gagal memuat tren KPI:', err);
+        kpiTrendCache[uid] = { months: {}, at: Date.now(), error: err.message || String(err) };
+      }).finally(function () { renderKpiTrend(uid); });
+    }
+
+    function kpiTrendPointsFor(uid) {
+      const c = kpiTrendCache[uid] || { months: {} };
+      const cur = kpiCurrentMonth();
+      const liveRow = kpiData && kpiData.month === cur ? kpiData.rows.find(function (r) { return r.uid === uid; }) : null;
+      return kpiTrendMonthList().map(function (ym) {
+        if (ym === cur) return { ym: ym, v: liveRow ? kpiScore(liveRow.counts, kpiItems()).total : null, live: true };
+        const m = c.months[ym];
+        return { ym: ym, v: m && Number.isFinite(Number(m.total)) ? Number(m.total) : null, live: false };
+      });
+    }
+
+    function kpiTrendSvg(pts) {
+      const W = 340, H = 172, L0 = 30, R0 = 326, T0 = 24, B0 = 136;
+      const step = (R0 - L0) / (pts.length - 1);
+      const x = function (i) { return L0 + i * step; };
+      const y = function (v) { return B0 - (Math.max(0, Math.min(100, v)) / 100) * (B0 - T0); };
+      let g = '';
+      [0, 50, 100].forEach(function (v) {   // grid hairline, recessive
+        g += '<line x1="' + L0 + '" x2="' + R0 + '" y1="' + y(v) + '" y2="' + y(v) + '" stroke="#e6e8ef" stroke-width="1"/>' +
+          '<text x="' + (L0 - 6) + '" y="' + (y(v) + 3.5) + '" font-size="10" text-anchor="end" fill="#8a8f9c">' + v + '</text>';
+      });
+      pts.forEach(function (p, i) {
+        g += '<text x="' + x(i) + '" y="' + (B0 + 18) + '" font-size="10.5" text-anchor="middle" fill="' + (p.live ? '#161b2e' : '#8a8f9c') + '"' +
+          (p.live ? ' font-weight="700"' : '') + '>' + kpiMonthShort(p.ym) + '</text>';
+      });
+      // garis antar titik yang ada (bulan tanpa rekap = celah); menuju bulan berjalan = putus-putus
+      for (let i = 1; i < pts.length; i++) {
+        const a = pts[i - 1], b = pts[i];
+        if (a.v == null || b.v == null) continue;
+        g += '<line x1="' + x(i - 1) + '" y1="' + y(a.v) + '" x2="' + x(i) + '" y2="' + y(b.v) + '" stroke="' + KPI_TREND_COLOR + '" stroke-width="2" stroke-linecap="round"' +
+          (b.live ? ' stroke-dasharray="4 4"' : '') + '/>';
+      }
+      // label nilai selektif: titik final terakhir + bulan berjalan
+      let lastFinal = -1;
+      pts.forEach(function (p, i) { if (p.v != null && !p.live) lastFinal = i; });
+      pts.forEach(function (p, i) {
+        if (p.v == null) return;
+        g += '<circle cx="' + x(i) + '" cy="' + y(p.v) + '" r="4.5" fill="' + (p.live ? '#ffffff' : KPI_TREND_COLOR) + '" stroke="' +
+          (p.live ? KPI_TREND_COLOR : '#ffffff') + '" stroke-width="2"/>';
+        if (i === lastFinal || p.live) {
+          g += '<text x="' + x(i) + '" y="' + (y(p.v) - 10) + '" font-size="11" font-weight="700" text-anchor="middle" fill="#161b2e">' + kpiFmt(p.v) + '</text>';
+        }
+      });
+      // crosshair + area sentuh per bulan (lebih lebar dari titiknya)
+      g += '<line id="kpiTrendCross" x1="0" x2="0" y1="' + T0 + '" y2="' + B0 + '" stroke="#5b6275" stroke-width="1" visibility="hidden"/>';
+      pts.forEach(function (p, i) {
+        g += '<rect x="' + (x(i) - step / 2) + '" y="' + (T0 - 14) + '" width="' + step + '" height="' + (B0 - T0 + 30) + '" fill="transparent" tabindex="0"' +
+          ' style="outline:none;cursor:pointer" onpointerenter="kpiTrendHover(' + i + ')" onfocus="kpiTrendHover(' + i + ')" onclick="kpiTrendHover(' + i + ')"' +
+          ' onpointerleave="kpiTrendHover(-1)" onblur="kpiTrendHover(-1)"><title>' + kpiMonthLabel(p.ym) + '</title></rect>';
+      });
+      return '<svg viewBox="0 0 ' + W + ' ' + H + '" width="100%" role="img" aria-label="Grafik tren skor KPI 6 bulan" style="display:block;overflow:visible">' + g + '</svg>';
+    }
+
+    function kpiTrendHover(i) {
+      const tip = document.getElementById('kpiTrendTip');
+      const cross = document.getElementById('kpiTrendCross');
+      if (!tip || !cross) return;
+      const p = kpiTrendPoints[i];
+      if (!p) { tip.style.display = 'none'; cross.setAttribute('visibility', 'hidden'); return; }
+      const L0 = 30, R0 = 326, step = (R0 - L0) / (kpiTrendPoints.length - 1), cx = L0 + i * step;
+      cross.setAttribute('x1', cx); cross.setAttribute('x2', cx); cross.setAttribute('visibility', 'visible');
+      tip.textContent = '';
+      const val = document.createElement('b');
+      val.textContent = p.v == null ? 'Belum direkap' : kpiFmt(p.v) + ' / 100';
+      const lab = document.createElement('span');
+      lab.textContent = ' ' + kpiMonthLabel(p.ym) + (p.live ? ' (berjalan)' : '');
+      lab.style.color = '#5b6275';
+      tip.appendChild(val); tip.appendChild(lab);
+      tip.style.display = 'block';
+      const pct = (cx / 340) * 100;   // titik di separuh kanan: tooltip menempel ke kanan supaya tidak terpotong
+      if (pct > 50) { tip.style.left = 'auto'; tip.style.right = Math.max(0, 100 - pct - 8) + '%'; }
+      else { tip.style.right = 'auto'; tip.style.left = Math.max(0, pct - 8) + '%'; }
+    }
+
+    function renderKpiTrend(uid) {
+      const box = document.getElementById('kpiTrendBox');
+      if (!box || box.getAttribute('data-uid') !== uid) return;
+      const c = kpiTrendCache[uid];
+      if (!c || c.loading) { box.innerHTML = '<p class="text-xs text-[var(--muted)] py-6 text-center">Memuat tren...</p>'; return; }
+      if (c.error) { box.innerHTML = '<p class="text-xs text-[var(--red)] py-3">Gagal memuat tren: ' + escapeHtml(c.error) + '</p>'; return; }
+      kpiTrendPoints = kpiTrendPointsFor(uid);
+      const withVal = kpiTrendPoints.filter(function (p) { return p.v != null; });
+      const finals = kpiTrendPoints.filter(function (p) { return p.v != null && !p.live; });
+      // Perbandingan hanya antar bulan yang sudah selesai; bulan berjalan ditampilkan sebagai angka sementara
+      // (skor tengah bulan memang selalu lebih rendah, jadi tidak adil dibandingkan dengan bulan penuh).
+      let summary;
+      if (!finals.length) {
+        summary = 'Belum ada rekap bulan sebelumnya. Grafik terisi otomatis setiap tanggal 3 setelah rekap bulan lalu disimpan.';
+      } else if (finals.length >= 2) {
+        const a = finals[finals.length - 2], b = finals[finals.length - 1];
+        const d = b.v - a.v;
+        summary = kpiMonthLabel(b.ym) + ': <b>' + kpiFmt(b.v) + '</b>, ' +
+          (Math.abs(d) < 0.05 ? 'sama dengan ' : (d > 0 ? 'naik ' : 'turun ') + kpiFmt(Math.abs(d)) + ' poin dari ') + kpiMonthLabel(a.ym) + '.';
+      } else {
+        summary = kpiMonthLabel(finals[0].ym) + ': <b>' + kpiFmt(finals[0].v) + '</b> (baru 1 bulan direkap).';
+      }
+      const liveP = kpiTrendPoints[kpiTrendPoints.length - 1];
+      if (liveP && liveP.live && liveP.v != null) summary += ' Bulan ini sementara ' + kpiFmt(liveP.v) + ' (masih berjalan).';
+      const rows = kpiTrendPoints.slice().reverse().map(function (p) {
+        return '<div class="flex justify-between py-1 border-t border-[var(--line)] first:border-t-0"><span>' + kpiMonthLabel(p.ym) + (p.live ? ' (berjalan)' : '') + '</span>' +
+          '<b>' + (p.v == null ? '<span class="font-normal text-[var(--muted)]">belum direkap</span>' : kpiFmt(p.v)) + '</b></div>';
+      }).join('');
+      box.innerHTML =
+        '<div class="relative">' +
+          '<div id="kpiTrendTip" class="absolute top-0 text-xs bg-white border border-[var(--line)] rounded-lg px-2.5 py-1.5 shadow pointer-events-none whitespace-nowrap" style="display:none;z-index:2;"></div>' +
+          kpiTrendSvg(kpiTrendPoints) +
+        '</div>' +
+        '<p class="text-xs text-[var(--ink)] mt-1">' + summary + '</p>' +
+        '<p class="text-[0.6875rem] text-[var(--muted)] mt-0.5">Titik berongga & garis putus-putus = bulan berjalan (belum final).</p>' +
+        '<details class="mt-1.5"><summary class="text-xs font-semibold text-[var(--brand-dark)] cursor-pointer">Lihat angka per bulan</summary>' +
+          '<div class="text-xs mt-1.5">' + rows + '</div></details>';
+    }
+
+    // SPV/Super Admin: simpan skor bulan yang sedang ditampilkan (bulan lalu) ke grafik tren.
+    // Memakai data yang sudah dimuat (0 read tambahan), 1 write per marketing.
+    function saveKpiTrendSnapshot() {
+      if (!kpiData || !kpiCanVerify()) return;
+      if (kpiData.month >= kpiCurrentMonth()) { alert('Bulan berjalan belum bisa disimpan. Pilih bulan yang sudah lewat.'); return; }
+      if (!confirm('Simpan skor KPI ' + kpiMonthLabel(kpiData.month) + ' untuk ' + kpiData.rows.length + ' marketing ke grafik tren?\n\nKalau bulan ini sudah pernah disimpan, angkanya diganti dengan yang sekarang.')) return;
+      const items = kpiItems();
+      const batch = db.batch();
+      kpiData.rows.forEach(function (r) {
+        const sc = kpiScore(r.counts, items);
+        const parts = {};
+        sc.parts.forEach(function (p) { parts[p.item.key] = p.actual; });
+        const months = {};
+        months[kpiData.month] = { total: Math.round(sc.total * 100) / 100, parts: parts, lockedAt: FieldValue.serverTimestamp(), lockedBy: currentUser.name || '' };
+        batch.set(kpiHistoryRef(r.uid), { name: r.name, months: months, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+      });
+      batch.commit().then(function () {
+        kpiTrendCache = {};
+        alert('Skor ' + kpiMonthLabel(kpiData.month) + ' tersimpan ke grafik tren.');
+      }).catch(function (err) { alert('Gagal menyimpan: ' + err.message); });
     }
 
     // Lead milik marketing yang berubah sejak tanggal tertentu (cukup untuk menghitung KPI bulan itu).
@@ -3819,7 +3994,10 @@
           : '') +
         (kpiView !== 'settings' && kpiData && !kpiLoading && kpiData.loadedAt
           ? '<p class="text-[0.6875rem] text-[var(--muted)] -mt-1 mb-3">Data per jam ' + formatTimeID(new Date(kpiData.loadedAt)) +
-              ' &middot; <button type="button" onclick="loadKpiData(true)" class="font-semibold text-[var(--brand-dark)] underline">Muat ulang</button></p>'
+              ' &middot; <button type="button" onclick="loadKpiData(true)" class="font-semibold text-[var(--brand-dark)] underline">Muat ulang</button>' +
+              (kpiView === 'list' && kpiCanVerify() && kpiData.month < kpiCurrentMonth()
+                ? ' &middot; <button type="button" onclick="saveKpiTrendSnapshot()" class="font-semibold text-[var(--brand-dark)] underline">Simpan ke grafik tren</button>' : '') +
+            '</p>'
           : '');
 
       if (kpiView === 'settings') { body.innerHTML = head + renderKpiSettingsHtml(items); return; }
@@ -3833,6 +4011,8 @@
       }
       if (kpiView === 'detail') {
         body.innerHTML = head + renderKpiDetailHtml(items);
+        const trendRow = kpiData.rows[kpiDetailIndex];
+        if (trendRow) ensureKpiTrend(trendRow.uid);
         const noteEl = document.getElementById('kpiReportNote');
         if (kpiFocusReport && noteEl) {
           kpiFocusReport = false;
@@ -3966,6 +4146,8 @@
           '<div><p class="font-bold">' + escapeHtml(r.name) + '</p><p class="text-xs text-[var(--muted)]">' + kpiMonthLabel(kpiData.month) + '</p></div>' +
           '<p class="text-2xl font-bold">' + kpiFmt(score.total) + '<span class="text-sm font-normal text-[var(--muted)]"> / 100</span></p>' +
         '</div>' + kpiBarHtml(score.total / 100) +
+        '<h4 class="font-bold text-sm mt-5 mb-1">Tren 6 bulan</h4>' +
+        '<div id="kpiTrendBox" data-uid="' + escapeHtml(r.uid) + '"></div>' +
         '<div class="space-y-2 mt-4">' + indicators + '</div>' +
         '<h4 class="font-bold text-sm mt-5 mb-2">Closing ITJ / SPPR (' + r.closings.length + ')</h4>' + closingsHtml +
         '<h4 class="font-bold text-sm mt-5 mb-2">Laporan Online/Offline (' + validCount + ' valid, ' + r.counts.online + ' hari)</h4>' +
@@ -7735,7 +7917,7 @@
       { key: 'spam', label: 'Nomor spam', hint: 'Input Spam dari CS (tampil di Riwayat).' },
       { key: 'reminderLogs', label: 'Log pengingat WA', hint: 'Catatan siapa yang mengingatkan marketing lewat WA.' },
       { key: 'activity', label: 'Aktivitas marketing', hint: 'Catatan login dan update data tiap marketing.' },
-      { key: 'kpi', label: 'Laporan KPI (Live / Canvasing)', hint: 'Laporan Online/Offline semua marketing. Target & bobot KPI tidak ikut terhapus.' },
+      { key: 'kpi', label: 'Laporan & tren KPI', hint: 'Laporan Live/Canvasing semua marketing dan rekap grafik tren. Target & bobot KPI tidak ikut terhapus.' },
       { key: 'broadcasts', label: 'Riwayat Kirim Notif', hint: 'Daftar notif/pengumuman yang pernah dikirim, termasuk riwayat di tombol lonceng.' },
       { key: 'rotation', label: 'Antrean giliran rotasi', noCount: true, hint: 'Giliran lead dimulai lagi dari marketing urutan pertama.' }
     ];
