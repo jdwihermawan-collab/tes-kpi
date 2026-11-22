@@ -561,6 +561,7 @@ function rowScore(r) { return kpiScore(r.counts, kpiItems()); }
 // Predikat penilaian kinerja (sama dengan tabel KPI lama): >= 75 Above, 60–75 Perform, < 60 Not Perform.
 // Untuk bulan berjalan predikatnya masih sementara.
 function kpiGrade(score) {
+  score = Math.round(score * 10) / 10; // sama dengan angka yang tampil (1 desimal)
   return score >= 75 ? { label: 'Above', cls: 'p-green' } : score >= 60 ? { label: 'Perform', cls: 'p-blue' } : { label: 'Not Perform', cls: 'p-red' };
 }
 function gradePill(score, temp) { const g = kpiGrade(score); return '<span class="pill ' + g.cls + '">' + (temp ? 'Sementara: ' : '') + g.label + '</span>'; }
