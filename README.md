@@ -41,3 +41,12 @@ Tanpa index, aplikasi tetap jalan (otomatis memakai query lama / lengkap), hanya
 - Rekap KPI harian `kpiDaily/{yyyy-mm}_{uid}`: menu KPI & barometer membaca rekap + perubahan setelah
   tanggal rekap. Dibuat cron 00.05 WIB, atau oleh SPV/Super Admin saat pertama membuka KPI hari itu.
 - Riwayat lonceng 1 dokumen per akun; data KPI disimpan sementara 10 menit di perangkat.
+
+## Tampilan baru (/v2/)
+- `v2/index.html`: tampilan baru gaya iOS (HP), memakai Firebase & data yang sama dengan tampilan lama (`/`).
+- `v2/core.js`: DIBUAT OTOMATIS dari `index.html` (APP_CONFIG + fungsi logika: KPI, terima lead, cek nomor
+  ganda, rekap hemat-read, lonceng). Setelah mengubah logika di `index.html`, jalankan:
+  `python3 scripts/build-v2-core.py`
+- Fitur yang masih di tampilan lama (dibuka lewat menu Lainnya): panel CS, Kelola Akun & Proyek,
+  Kirim Notif, Kirim Pengingat WA, Riwayat Input, Atur Target KPI, Reset Data, Tes Push.
+- `prototype/`: contoh desain statis (data dummy), tidak terhubung Firebase.
