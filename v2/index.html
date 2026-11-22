@@ -763,8 +763,13 @@ function kpiPersonBody(r, month, isSelf) {
   }).join('');
   const groups = groupClosings(r.closings);
   const closings = groups.length ? '<div class="group">' + groups.map(function (g) { return closingRow(g, !isSelf); }).join('') + '</div>' : '<div class="card empty" style="padding:18px">Belum ada closing bulan ini.</div>';
+  const repKey = r.uid + '|' + month, repAll = !!repShowAll[repKey];
+  const repList = r.reports ? (repAll ? r.reports : r.reports.slice(0, REP_PREVIEW)) : [];
+  const repMore = r.reports && r.reports.length > REP_PREVIEW
+    ? '<button class="row" style="justify-content:center" onclick="toggleRepAll(\'' + esc(repKey) + '\')"><span style="color:var(--tint);font-weight:500">' +
+      (repAll ? 'Tampilkan ' + REP_PREVIEW + ' terbaru saja' : 'Lihat selengkapnya (' + (r.reports.length - REP_PREVIEW) + ' lainnya)') + '</span></button>' : '';
   const reps = !r.reports ? '<div class="card loading" style="padding:18px">Memuat laporan…</div>' : r.reports.length
-    ? '<div class="group">' + r.reports.map(function (rep) { return reportRow(rep, r, isSelf); }).join('') + '</div>'
+    ? '<div class="group">' + repList.map(function (rep) { return reportRow(rep, r, isSelf); }).join('') + repMore + '</div>'
     : '<div class="card empty" style="padding:18px">Belum ada laporan bulan ini.</div>';
   return '<div class="card" style="margin-top:12px;display:flex;align-items:center;gap:18px"><div class="ring-wrap" style="width:124px;height:124px">' + ring(sc.total, 124, 12, cur && sc.total >= pace ? 'var(--green)' : 'var(--tint)') +
       '<div class="ring-num"><b>' + fmt(sc.total) + '</b><span>dari 100</span></div></div>' +
@@ -818,6 +823,10 @@ function closingRow(g, canAct) {
     '<div class="hstack" style="gap:6px;flex-wrap:wrap">' + stageChip(g.itj, 'ITJ') + stageChip(g.sppr, 'SPPR') + '</div>' +
     (canAct ? closingActions(g, false) : '') + '</div>';
 }
+// Laporan Online/Offline: tampilkan 5 terbaru, sisanya lewat "Lihat selengkapnya".
+const REP_PREVIEW = 5;
+const repShowAll = {};
+function toggleRepAll(key) { repShowAll[key] = !repShowAll[key]; rerender(); renderSheet(); }
 function reportRow(rep, row, isSelf) {
   const d = String(rep.dateKey || '').split('-');
   const detail = rep.type === 'Live TikTok' ? (rep.link ? '<a href="' + esc(rep.link) + '" target="_blank" rel="noopener" style="color:var(--tint)">Buka link TikTok</a>' : '')
