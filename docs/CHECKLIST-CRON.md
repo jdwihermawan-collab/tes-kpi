@@ -24,6 +24,7 @@ Tanpa cron, fitur berikut **TIDAK jalan**:
 | 7 | **KPI:** belum lapor Live TikTok / Canvasing hari ini | 16.00 WIB, Senin–Sabtu | Marketing yang belum lapor |
 | 8 | **KPI:** skor di bawah jalur | tanggal 20, 10.00 WIB (sekali sebulan) | Marketing + ringkasan ke SPV/Manager |
 | 9 | **KPI:** simpan rekap bulan lalu untuk grafik tren 6 bulan | tanggal 3, 02.00 WIB (sekali sebulan) | — (tanpa notifikasi) |
+| 10 | **Hemat read:** rekap KPI harian sampai kemarin (dipakai menu KPI & barometer) | setiap hari 00.05 WIB | — (tanpa notifikasi). Tanpa cron, rekap tetap dibuat saat SPV pertama kali membuka KPI hari itu |
 
 Yang **tidak** butuh cron (sudah jalan): push lead baru dari CS, lead diterima, janji kunjungan
 dibuat/dibatalkan, Kirim Notif, closing perlu verifikasi, closing disetujui/ditolak, laporan

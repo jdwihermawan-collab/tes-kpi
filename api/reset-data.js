@@ -35,7 +35,7 @@ const PAGE = 400;
 function queriesFor(item) {
   const db = L.db();
   if (item === 'kpi') {
-    return [{ q: db.collectionGroup('kpiItems'), counted: true }, { q: db.collection('kpiHistory'), counted: false }];
+    return [{ q: db.collectionGroup('kpiItems'), counted: true }, { q: db.collection('kpiHistory'), counted: false }, { q: db.collection('kpiDaily'), counted: false }];
   }
   if (item === 'activity') {
     return [{ q: db.collectionGroup('logs'), counted: true }, { q: db.collection('marketingActivity'), counted: false }];

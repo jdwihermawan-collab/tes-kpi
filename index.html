@@ -1111,6 +1111,9 @@
       <div id="marketingPendingContainer" class="hidden space-y-3"></div>
 
       <!-- Ajakan mengaktifkan push notification (disembunyikan kalau sudah aktif) -->
+      <!-- Pengingat lead lama tanpa update (supaya ditandai Lost bila sudah tidak berminat) -->
+      <div id="marketingStaleBanner" class="hidden rounded-xl px-3.5 py-3 text-sm" style="background:#fdf5ea;border:1px solid #f1d9b5;"></div>
+
       <div id="marketingPushBanner" class="hidden bg-[var(--brand-soft)] border border-[var(--line)] rounded-xl px-3.5 py-3">
         <p id="marketingPushBannerText" class="text-sm"></p>
         <button type="button" id="marketingPushBannerBtn" onclick="enablePushOnThisDevice()" class="btn-primary text-white font-semibold text-sm px-4 py-2 rounded-lg mt-2.5">Aktifkan Notifikasi</button>
@@ -1711,6 +1714,18 @@
     const db = firebase.firestore();
     const FieldValue = firebase.firestore.FieldValue;
 
+    // Cache offline Firestore (IndexedDB di HP/laptop): saat aplikasi dibuka ulang, data langsung tampil
+    // dari cache dan Firestore hanya mengirim (dan menagih) perubahan sejak sesi terakhir, selama jedanya
+    // belum lama (sekitar 30 menit). Dibersihkan saat logout (lihat handleLogout) supaya aman di HP bersama.
+    let firestoreCacheOn = false;
+    if (FIREBASE_CONFIG_READY) {
+      try {
+        db.enablePersistence({ synchronizeTabs: true })
+          .then(function () { firestoreCacheOn = true; })
+          .catch(function (err) { console.warn('Cache offline Firestore tidak aktif:', err && (err.code || err.message)); });
+      } catch (e) { console.warn('Cache offline Firestore tidak didukung:', e); }
+    }
+
     // ------------------------------------------------------------
     // Routing antar view
     // ------------------------------------------------------------
@@ -1761,6 +1776,7 @@
         if (filters.status && l.status !== filters.status) return false;
         if (filters.project && l.project !== filters.project) return false;
         if (filters.hotOnly && !l.isHot) return false;
+        if (filters.activeOnly && CLOSED_STATUSES.indexOf(l.status) !== -1) return false;   // dari tombol "Tampilkan lead tersebut"
         if (filters.search) {
           const q = filters.search.trim().toLowerCase();
           const name = (l.buyerName || '').toLowerCase();
@@ -2065,7 +2081,8 @@
       }
     }
 
-    function onMarketingFilterChange() {
+    function onMarketingFilterChange(keepActiveOnly) {
+      if (keepActiveOnly !== true) marketingFilterState.activeOnly = false;   // filter manual: tampilkan semua status lagi
       marketingFilterState.status = document.getElementById('marketingFilterStatus').value;
       marketingFilterState.project = document.getElementById('marketingFilterProject').value;
       marketingFilterState.search = document.getElementById('marketingFilterSearch').value;
@@ -3239,6 +3256,7 @@
       kpiReportsRef(r.uid).doc(id).update(payload)
         .then(function () {
           if (makeInvalid) callNotify('report-invalid', '', { uid: r.uid, reportId: id });   // push ke marketing-nya
+          delete kpiReportsCache[kpiData.month + '|' + r.uid];
           loadKpiData(true);
         })
         .catch(function (err) { alert('Gagal menyimpan: ' + err.message); });
@@ -3320,6 +3338,16 @@
         alert('Pilih minimal satu bagian yang mau diekspor.');
         return;
       }
+      const pbtn = document.querySelector('button[onclick="exportKpiPdf()"]');
+      if (pbtn) { pbtn.disabled = true; pbtn.textContent = 'Menyiapkan...'; }
+      (opt.laporan ? kpiEnsureAllReports() : Promise.resolve()).then(function () {
+        kpiBuildPdf(opt, who);
+      }).finally(function () {
+        if (pbtn) { pbtn.disabled = false; pbtn.textContent = 'Unduh PDF'; }
+      });
+    }
+
+    function kpiBuildPdf(opt, who) {
       const items = kpiItems();
       const doc = new window.jspdf.jsPDF({ orientation: 'landscape', unit: 'pt', format: 'a4' });
       const pageWidth = doc.internal.pageSize.getWidth();
@@ -3406,7 +3434,7 @@
       if (opt.laporan) {
         const laporan = [];
         srcRows.forEach(function (r) {
-          r.reports.forEach(function (rep) {
+          (r.reports || []).forEach(function (rep) {
             const p = String(rep.dateKey || '').split('-');
             const detail = rep.type === 'Live TikTok' ? (rep.link || '-')
               : ['Lokasi: ' + (rep.place || '-'), 'Izin: ' + (rep.permitFrom || '-'), 'Lapor: ' + (rep.reportGroup || '-') + (rep.reportTime ? ' jam ' + rep.reportTime : '')].join('\n');
@@ -3441,6 +3469,13 @@
 
     function exportKpiExcel() {
       if (!kpiData || kpiIsMarketing()) return;
+      const xbtn = document.getElementById('kpiExportXlsBtn');
+      if (xbtn) { xbtn.disabled = true; xbtn.textContent = 'Menyiapkan...'; }
+      kpiEnsureAllReports().then(exportKpiExcelNow);
+    }
+
+    function exportKpiExcelNow() {
+      if (!kpiData || kpiIsMarketing()) return;
       const btn = document.getElementById('kpiExportXlsBtn');
       if (btn) { btn.disabled = true; btn.textContent = 'Menyiapkan...'; }
       loadXlsxLib().then(function (XLSX) {
@@ -3460,7 +3495,7 @@
         const laporan = [['Nama Marketing', 'Tanggal', 'Jenis', 'Link TikTok', 'Lokasi', 'Izin dari', 'Lapor di grup', 'Jam lapor', 'Keterangan', 'Status', 'Alasan tidak valid']];
         const closing = [['Nama Marketing', 'Buyer', 'Proyek', 'Tahap', 'Tanggal', 'Unit', 'Nominal (Rp)', 'Verifikasi', 'Diputuskan oleh']];
         kpiData.rows.forEach(function (r) {
-          r.reports.forEach(function (rep) {
+          (r.reports || []).forEach(function (rep) {
             laporan.push([r.name, rep.dateKey, rep.type || '', rep.link || '', rep.place || '', rep.permitFrom || '', rep.reportGroup || '', rep.reportTime || '', rep.note || '',
               rep.invalid ? 'Tidak valid' : 'Dihitung', rep.invalidReason || '']);
           });
@@ -3512,20 +3547,35 @@
       if (!kpiIsMarketing()) return;
       const seq = kpiHome.seq + 1;
       const month = kpiCurrentMonth();
-      kpiHome = { seq: seq, month: month, leads: null, reports: null, error: '' };
+      kpiHome = { seq: seq, month: month, snap: null, leads: null, reports: null, error: '' };
       renderKpiGauge();
       db.collection('settings').doc('kpi').get()
         .then(function (s) { kpiConfig = s.exists ? s.data() : null; renderKpiGauge(); })
         .catch(function (err) { console.error('Gagal memuat pengaturan KPI:', err); });
-      kpiOwnLeadsSince(kpiMonthRange(month).start)
+      // Rekap harian (kalau ada) + lead yang berubah setelahnya + lead closing; tanpa rekap = lead sebulan.
+      db.collection('kpiDaily').doc(kpiSnapDocId(month, currentUser.uid)).get()
+        .then(function (s) { return s.exists ? s.data() : null; })
+        .catch(function () { return null; })
         .then(function (snap) {
           if (seq !== kpiHome.seq) return;
-          const map = {};
-          snap.docs.forEach(function (d) { map[d.id] = Object.assign({ id: d.id }, d.data()); });
-          // Lead yang sudah lebih dulu datang dari listener (lebih baru) tetap dipakai.
-          (marketingLeadsData || []).forEach(function (l) { map[l.id] = l; });
-          kpiHome.leads = map;
-          renderKpiGauge();
+          kpiHome.snap = snap;
+          const range = kpiMonthRange(month);
+          const since = snap ? kpiDayAfter(snap.asOf) : range.start;
+          const leadsP = since < range.end ? kpiOwnLeadsSince(since) : Promise.resolve({ docs: [] });
+          refreshKpiHomeReports();
+          return leadsP.then(function (qs) {
+            const map = {};
+            qs.docs.forEach(function (d) { map[d.id] = Object.assign({ id: d.id }, d.data()); });
+            const need = snap ? (snap.closings || []).map(function (c) { return c.leadId; }).filter(function (id) { return !map[id]; }) : [];
+            return kpiFetchLeadsByIds(need).then(function (list) {
+              if (seq !== kpiHome.seq) return;
+              list.forEach(function (l) { map[l.id] = l; });
+              // Lead yang sudah lebih dulu datang dari listener (lebih baru) tetap dipakai.
+              (marketingLeadsData || []).forEach(function (l) { map[l.id] = l; });
+              kpiHome.leads = map;
+              renderKpiGauge();
+            });
+          });
         })
         .catch(function (err) {
           if (seq !== kpiHome.seq) return;
@@ -3533,7 +3583,6 @@
           kpiHome.error = err.message || String(err);
           renderKpiGauge();
         });
-      refreshKpiHomeReports();
     }
 
     function stopKpiHome() {
@@ -3547,19 +3596,13 @@
     function refreshKpiHomeReports() {
       if (!kpiIsMarketing() || !kpiHome.month) return;
       const seq = kpiHome.seq;
-      const range = kpiMonthRange(kpiHome.month);
-      kpiReportsRef(currentUser.uid).where('dateKey', '>=', range.firstKey).where('dateKey', '<=', range.lastKey).get()
-        .then(function (snap) {
-          if (seq !== kpiHome.seq) return;
-          kpiHome.reports = snap.docs.map(function (d) { return d.data(); });
-          renderKpiGauge();
-        })
-        .catch(function (err) {
-          if (seq !== kpiHome.seq) return;
-          console.error('Gagal memuat laporan KPI:', err);
-          kpiHome.reports = [];
-          renderKpiGauge();
-        });
+      const snap = kpiHome.snap;
+      // Dengan rekap, cukup laporan setelah tanggal rekap; tanpa rekap, laporan sebulan.
+      kpiQueryReports(currentUser.uid, snap ? snap.asOf : null, kpiMonthRange(kpiHome.month)).then(function (list) {
+        if (seq !== kpiHome.seq) return;
+        kpiHome.reports = list;
+        renderKpiGauge();
+      });
     }
 
     // Dipanggil setiap data lead marketing berubah (listener real-time).
@@ -3617,8 +3660,8 @@
       }
       const month = kpiHome.month;
       const items = kpiItems();
-      const counts = kpiCountLeads(Object.keys(kpiHome.leads).map(function (k) { return kpiHome.leads[k]; }), kpiMonthRange(month));
-      counts.online = kpiOnlineCount(kpiHome.reports);
+      const counts = kpiBuildRow({ uid: currentUser.uid, name: currentUser.name }, kpiHome.snap,
+        Object.keys(kpiHome.leads).map(function (k) { return kpiHome.leads[k]; }), kpiHome.reports, !kpiHome.snap, kpiMonthRange(month)).counts;
       const score = kpiScore(counts, items);
       const now = new Date();
       const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
@@ -3891,6 +3934,189 @@
       loadKpiData();
     }
 
+    // ------------------------------------------------------------
+    // Rekap KPI harian (kpiDaily/{yyyy-mm}_{uid}) untuk hemat read.
+    // Isinya: hitungan KPI sampai akhir hari `asOf` (Database Baru, Follow Up, Survey, WI), tanggal
+    // laporan Online/Offline yang valid, dan daftar closing (leadId, tahap, tanggal). ITJ/SPPR tidak
+    // disimpan sebagai angka karena status verifikasinya bisa berubah: dihitung ulang dari lead closing.
+    // Membuka KPI = baca rekap + lead yang berubah SETELAH asOf (biasanya hanya lead hari ini) + lead
+    // closing. Rekap ditulis server setiap 00.05 WIB, atau oleh SPV/Super Admin saat membuka KPI dan
+    // rekap sampai kemarin belum ada (sekali sehari, lalu dipakai semua akun).
+    // ------------------------------------------------------------
+    const KPI_SNAP_KEYS = ['dbBaru', 'followUp', 'survey', 'walkIn'];
+    let kpiReportsCache = {};   // 'yyyy-mm|uid' -> laporan sebulan penuh (sudah dibaca di sesi ini)
+
+    function kpiSnapDocId(ym, uid) { return ym + '_' + uid; }
+    function kpiDayAfter(dateKey) {
+      const p = String(dateKey).split('-');
+      return new Date(Number(p[0]), Number(p[1]) - 1, Number(p[2]) + 1);
+    }
+    // asOf yang pantas disimpan untuk bulan ym: bulan lalu = hari terakhirnya; bulan ini = kemarin (null di tanggal 1).
+    function kpiSnapTargetAsOf(ym) {
+      const cur = kpiCurrentMonth();
+      if (ym > cur) return null;
+      if (ym < cur) return kpiDateKey(new Date(kpiMonthRange(ym).end.getTime() - 86400000));
+      const y = new Date();
+      y.setDate(y.getDate() - 1);
+      const k = kpiDateKey(y);
+      return k.slice(0, 7) === ym ? k : null;
+    }
+    function kpiSortReports(list) {
+      return list.slice().sort(function (a, b) {
+        return a.dateKey === b.dateKey ? toJsDate(b.createdAt) - toJsDate(a.createdAt) : (a.dateKey < b.dateKey ? 1 : -1);
+      });
+    }
+
+    // Satu baris KPI. snap = rekap (null = hitung penuh dari `leads`). Di mode rekap, `leads` cukup lead
+    // yang berubah setelah asOf + lead closing; `reports` cukup laporan setelah asOf, kecuali reportsFull.
+    function kpiBuildRow(person, snap, leads, reports, reportsFull, range) {
+      const byId = {};
+      leads.forEach(function (l) { byId[l.id] = l; });
+      let counts, closings = [];
+      if (snap) {
+        const deltaStart = kpiDayAfter(snap.asOf);
+        const deltaClosings = [];
+        counts = deltaStart < range.end
+          ? kpiCountLeads(leads, { start: deltaStart, end: range.end }, deltaClosings)
+          : { dbBaru: 0, followUp: 0, survey: 0, walkIn: 0 };
+        KPI_SNAP_KEYS.forEach(function (k) { counts[k] = (counts[k] || 0) + (Number((snap.counts || {})[k]) || 0); });
+        (snap.closings || []).forEach(function (c) {
+          const l = byId[c.leadId];
+          if (l) closings.push({ lead: l, key: c.stage, date: new Date(Number(c.date)), status: kpiVerifyStatus(l, c.stage) });
+        });
+        closings = closings.concat(deltaClosings);
+        ['itj', 'sppr'].forEach(function (k) {
+          counts[k] = closings.filter(function (c) { return c.key === k && c.status === 'approved'; }).length;
+          counts[k + 'Pending'] = closings.filter(function (c) { return c.key === k && c.status === 'pending'; }).length;
+        });
+        counts.online = reportsFull ? kpiOnlineCount(reports)
+          : new Set((snap.onlineDays || []).concat((reports || []).filter(function (r) { return !r.invalid && r.dateKey > snap.asOf; })
+              .map(function (r) { return r.dateKey; }))).size;
+      } else {
+        counts = kpiCountLeads(leads, range, closings);
+        counts.online = kpiOnlineCount(reports || []);
+      }
+      closings.sort(function (a, b) { return b.date - a.date; });
+      return { uid: person.uid, name: person.name, counts: counts, reports: reportsFull ? kpiSortReports(reports || []) : null, closings: closings };
+    }
+
+    // Rekap untuk disimpan, dari data lengkap bulan itu (dipotong sampai akhir hari asOf).
+    function kpiMakeSnap(person, leads, reports, ym, asOf) {
+      const closings = [];
+      const c = kpiCountLeads(leads, { start: kpiMonthRange(ym).start, end: kpiDayAfter(asOf) }, closings);
+      const counts = {};
+      KPI_SNAP_KEYS.forEach(function (k) { counts[k] = c[k] || 0; });
+      return {
+        uid: person.uid, ym: ym, name: person.name, asOf: asOf, counts: counts,
+        onlineDays: Array.from(new Set((reports || []).filter(function (r) { return !r.invalid && r.dateKey <= asOf; }).map(function (r) { return r.dateKey; }))),
+        closings: closings.map(function (x) { return { leadId: x.lead.id, stage: x.key, date: x.date.getTime() }; })
+      };
+    }
+
+    function kpiSaveSnaps(ym, snaps) {
+      if (!kpiCanVerify() || !snaps.length) return;
+      const batch = db.batch();
+      snaps.forEach(function (s) {
+        batch.set(db.collection('kpiDaily').doc(kpiSnapDocId(ym, s.uid)),
+          Object.assign({}, s, { computedAt: FieldValue.serverTimestamp(), computedBy: currentUser.name || '' }));
+      });
+      batch.commit().catch(function (err) { console.warn('Gagal menyimpan rekap KPI harian:', err); });
+    }
+
+    function kpiQueryReports(uid, fromKeyExclusive, range) {
+      let q = kpiReportsRef(uid).where('dateKey', '<=', range.lastKey);
+      q = fromKeyExclusive ? q.where('dateKey', '>', fromKeyExclusive) : q.where('dateKey', '>=', range.firstKey);
+      return q.get()
+        .then(function (snap) { return snap.docs.map(function (d) { return Object.assign({ id: d.id }, d.data({ serverTimestamps: 'estimate' })); }); })
+        .catch(function (err) { console.error('Gagal memuat laporan KPI:', err); return []; });
+    }
+
+    function kpiFetchLeadsByIds(ids) {
+      return Promise.all(ids.map(function (id) {
+        return db.collection('leads').doc(id).get().then(function (d) { return d.exists ? Object.assign({ id: d.id }, d.data()) : null; })
+          .catch(function () { return null; });
+      })).then(function (list) { return list.filter(Boolean); });
+    }
+
+    // Mode lengkap: semua lead yang berubah sejak awal bulan + laporan sebulan penuh.
+    // SPV/Super Admin sekalian menyimpan rekap sampai kemarin supaya pembukaan berikutnya hemat.
+    function kpiLoadFull(month, range, people, isMk) {
+      const leadsP = isMk ? kpiOwnLeadsSince(range.start) : db.collection('leads').where('lastUpdated', '>=', range.start).get();
+      const reportsP = Promise.all(people.map(function (p) { return kpiQueryReports(p.uid, null, range); }));
+      return Promise.all([leadsP, reportsP]).then(function (res) {
+        const leads = res[0].docs.map(function (d) { return Object.assign({ id: d.id }, d.data()); });
+        const leadsById = {};
+        leads.forEach(function (l) { leadsById[l.id] = l; });
+        const asOf = kpiSnapTargetAsOf(month);
+        const snaps = [];
+        const rows = people.map(function (p, i) {
+          const mine = leads.filter(function (l) { return l.assignedTo === p.name; });
+          kpiReportsCache[month + '|' + p.uid] = res[1][i];
+          if (asOf) snaps.push(kpiMakeSnap(p, mine, res[1][i], month, asOf));
+          return kpiBuildRow(p, null, mine, res[1][i], true, range);
+        });
+        if (asOf && !isMk) kpiSaveSnaps(month, snaps);
+        return { month: month, rows: rows, leadsById: leadsById, loadedAt: Date.now(), mode: 'lengkap' };
+      });
+    }
+
+    // Mode rekap: rekap + perubahan setelah asOf + lead closing (status verifikasi terbaru).
+    function kpiLoadFromSnaps(month, range, people, snaps, isMk) {
+      const asOf = snaps[people[0].uid].asOf;
+      const deltaStart = kpiDayAfter(asOf);
+      const hasDelta = deltaStart < range.end;
+      const leadsP = !hasDelta ? Promise.resolve({ docs: [] })
+        : (isMk ? kpiOwnLeadsSince(deltaStart) : db.collection('leads').where('lastUpdated', '>=', deltaStart).get());
+      const reportsP = Promise.all(people.map(function (p) {
+        const full = kpiReportsCache[month + '|' + p.uid];
+        if (full) return Promise.resolve({ full: true, list: full });
+        return hasDelta ? kpiQueryReports(p.uid, asOf, range).then(function (l) { return { full: false, list: l }; })
+          : Promise.resolve({ full: false, list: [] });
+      }));
+      return Promise.all([leadsP, reportsP]).then(function (res) {
+        const delta = res[0].docs.map(function (d) { return Object.assign({ id: d.id }, d.data()); });
+        const leadsById = {};
+        delta.forEach(function (l) { leadsById[l.id] = l; });
+        const need = [];
+        people.forEach(function (p) {
+          (snaps[p.uid].closings || []).forEach(function (c) { if (!leadsById[c.leadId] && need.indexOf(c.leadId) === -1) need.push(c.leadId); });
+        });
+        return kpiFetchLeadsByIds(need).then(function (closingLeads) {
+          closingLeads.forEach(function (l) { leadsById[l.id] = l; });
+          const rows = people.map(function (p, i) {
+            const snap = snaps[p.uid];
+            const ids = (snap.closings || []).map(function (c) { return c.leadId; });
+            const mine = delta.filter(function (l) { return l.assignedTo === p.name; });
+            ids.forEach(function (id) { if (leadsById[id] && mine.indexOf(leadsById[id]) === -1) mine.push(leadsById[id]); });
+            return kpiBuildRow(p, snap, mine, res[1][i].list, res[1][i].full, range);
+          });
+          return { month: month, rows: rows, leadsById: leadsById, loadedAt: Date.now(), mode: 'rekap', asOf: asOf };
+        });
+      });
+    }
+
+    // Laporan sebulan penuh satu marketing (untuk rincian / export), dibaca sekali per sesi.
+    function kpiFetchRowReports(row, silent) {
+      if (!kpiData) return Promise.resolve();
+      if (row.reports) return Promise.resolve();
+      if (row.reportsPromise) return row.reportsPromise;
+      const month = kpiData.month;
+      row.reportsPromise = kpiQueryReports(row.uid, null, kpiMonthRange(month)).then(function (list) {
+        kpiReportsCache[month + '|' + row.uid] = list;
+        row.reports = kpiSortReports(list);
+        row.counts.online = kpiOnlineCount(list);
+      }).finally(function () {
+        row.reportsPromise = null;
+        if (!silent && kpiModalOpen) renderKpi();
+      });
+      return row.reportsPromise;
+    }
+
+    function kpiEnsureAllReports() {
+      if (!kpiData) return Promise.resolve();
+      return Promise.all(kpiData.rows.map(function (r) { return kpiFetchRowReports(r, true); }));
+    }
+
     // Data KPI per bulan disimpan sementara (KPI_CACHE_MS) supaya buka-tutup menu KPI atau
     // ganti bulan bolak-balik tidak membaca ulang database. force = true untuk ambil data terbaru.
     const KPI_CACHE_MS = 10 * 60 * 1000;
@@ -3921,35 +4147,25 @@
       const cfgP = db.collection('settings').doc('kpi').get()
         .then(function (s) { kpiConfig = s.exists ? s.data() : null; })
         .catch(function (err) { console.error('Gagal memuat pengaturan KPI:', err); });
-      // Marketing: semua lead miliknya. SPV/Super Admin: lead yang berubah sejak awal bulan terpilih
-      // (lead yang punya kejadian di bulan itu pasti lastUpdated-nya >= awal bulan).
-      const leadsP = isMk
-        ? kpiOwnLeadsSince(range.start)
-        : db.collection('leads').where('lastUpdated', '>=', range.start).get();
-      const reportsP = Promise.all(people.map(function (p) {
-        return kpiReportsRef(p.uid).where('dateKey', '>=', range.firstKey).where('dateKey', '<=', range.lastKey).get()
-          .then(function (snap) { return snap.docs.map(function (d) { return Object.assign({ id: d.id }, d.data({ serverTimestamps: 'estimate' })); }); })
-          .catch(function (err) { console.error('Gagal memuat laporan KPI ' + p.name + ':', err); return []; });
-      }));
+      const snapsP = (isMk
+        ? db.collection('kpiDaily').doc(kpiSnapDocId(month, currentUser.uid)).get().then(function (s) { return s.exists ? [s.data()] : []; })
+        : db.collection('kpiDaily').where('ym', '==', month).get().then(function (s) { return s.docs.map(function (d) { return d.data(); }); })
+      ).catch(function (err) { console.warn('Rekap KPI harian belum bisa dibaca:', err && err.message); return []; });
 
-      Promise.all([cfgP, leadsP, reportsP]).then(function (res) {
+      Promise.all([cfgP, snapsP]).then(function (res) {
+        const snaps = {};
+        res[1].forEach(function (s) { if (s && s.uid) snaps[s.uid] = s; });
+        const asOfs = people.map(function (p) { return snaps[p.uid] ? snaps[p.uid].asOf : ''; });
+        const target = kpiSnapTargetAsOf(month);
+        // Rekap dipakai kalau tersedia untuk semua marketing dengan tanggal yang sama. SPV/Super Admin
+        // memakai mode lengkap kalau rekapnya sudah basi, sekaligus memperbaruinya (sekali sehari).
+        const usable = force !== 'lengkap' && people.length > 0 && asOfs[0] &&
+          asOfs.every(function (a) { return a === asOfs[0]; }) && (isMk || !kpiCanVerify() || !target || asOfs[0] >= target);
+        return usable ? kpiLoadFromSnaps(month, range, people, snaps, isMk) : kpiLoadFull(month, range, people, isMk);
+      }).then(function (data) {
         if (seq !== kpiLoadSeq) return;
-        const leads = res[1].docs.map(function (d) { return Object.assign({ id: d.id }, d.data()); });
-        const leadsById = {};
-        leads.forEach(function (l) { leadsById[l.id] = l; });
-        const reportLists = res[2];
-        const rows = people.map(function (p, i) {
-          const closings = [];
-          const counts = kpiCountLeads(leads.filter(function (l) { return l.assignedTo === p.name; }), range, closings);
-          closings.sort(function (a, b) { return b.date - a.date; });
-          const reports = reportLists[i].slice().sort(function (a, b) {
-            return a.dateKey === b.dateKey ? toJsDate(b.createdAt) - toJsDate(a.createdAt) : (a.dateKey < b.dateKey ? 1 : -1);
-          });
-          counts.online = kpiOnlineCount(reports);
-          return { uid: p.uid, name: p.name, counts: counts, reports: reports, closings: closings };
-        });
-        kpiData = { month: month, rows: rows, leadsById: leadsById, loadedAt: Date.now() };
-        kpiCache[cacheKey] = kpiData;
+        kpiData = data;
+        kpiCache[cacheKey] = data;
         kpiLoading = false;
         renderKpi();
       }).catch(function (err) {
@@ -3993,7 +4209,8 @@
             '</div>' + (kpiPdfOptionsOpen ? renderKpiPdfOptionsHtml() : '')
           : '') +
         (kpiView !== 'settings' && kpiData && !kpiLoading && kpiData.loadedAt
-          ? '<p class="text-[0.6875rem] text-[var(--muted)] -mt-1 mb-3">Data per jam ' + formatTimeID(new Date(kpiData.loadedAt)) +
+          ? '<p class="text-[0.6875rem] text-[var(--muted)] -mt-1 mb-3">' + (kpiData.mode === 'rekap' ? 'Rekap s.d. ' + kpiData.asOf.split('-').reverse().join('/') + ' + data terbaru, ' : '') +
+              'per jam ' + formatTimeID(new Date(kpiData.loadedAt)) +
               ' &middot; <button type="button" onclick="loadKpiData(true)" class="font-semibold text-[var(--brand-dark)] underline">Muat ulang</button>' +
               (kpiView === 'list' && kpiCanVerify() && kpiData.month < kpiCurrentMonth()
                 ? ' &middot; <button type="button" onclick="saveKpiTrendSnapshot()" class="font-semibold text-[var(--brand-dark)] underline">Simpan ke grafik tren</button>' : '') +
@@ -4013,6 +4230,7 @@
         body.innerHTML = head + renderKpiDetailHtml(items);
         const trendRow = kpiData.rows[kpiDetailIndex];
         if (trendRow) ensureKpiTrend(trendRow.uid);
+        if (trendRow && !trendRow.reports) kpiFetchRowReports(trendRow, false);   // laporan dibaca saat rincian dibuka
         const noteEl = document.getElementById('kpiReportNote');
         if (kpiFocusReport && noteEl) {
           kpiFocusReport = false;
@@ -4089,8 +4307,10 @@
         ? '<div class="space-y-2">' + r.closings.map(function (cl) { return kpiClosingRowHtml(cl, r.name, false); }).join('') + '</div>'
         : '<p class="text-sm text-[var(--muted)] py-2">Belum ada closing ITJ / SPPR di bulan ini.</p>';
 
-      const reports = r.reports.length
-        ? r.reports.map(function (rep) {
+      const repList = r.reports || [];
+      const reports = !r.reports ? '<p class="text-sm text-[var(--muted)] py-2">Memuat laporan...</p>'
+        : repList.length
+        ? repList.map(function (rep) {
             const p = rep.dateKey.split('-');
             const invalid = !!rep.invalid;
             const actions = [];
@@ -4140,7 +4360,7 @@
           '</div>'
         : '';
 
-      const validCount = r.reports.filter(function (x) { return !x.invalid; }).length;
+      const validCount = repList.filter(function (x) { return !x.invalid; }).length;
       return back +
         '<div class="flex items-end justify-between gap-2 mb-2">' +
           '<div><p class="font-bold">' + escapeHtml(r.name) + '</p><p class="text-xs text-[var(--muted)]">' + kpiMonthLabel(kpiData.month) + '</p></div>' +
@@ -4260,6 +4480,7 @@
       if (btn) { btn.disabled = true; btn.textContent = 'Menyimpan...'; }
       kpiReportsRef(currentUser.uid).add(doc).then(function () {
         kpiSaving = false;
+        delete kpiReportsCache[kpiMonth + '|' + currentUser.uid];
         loadKpiData(true);
         refreshKpiHomeReports();
       }).catch(function (err) {
@@ -4274,6 +4495,7 @@
       if (!r || !id) return;
       if (!confirm('Hapus laporan ini?')) return;
       kpiReportsRef(r.uid).doc(id).delete().then(function () {
+        delete kpiReportsCache[kpiData.month + '|' + r.uid];
         loadKpiData(true);
         refreshKpiHomeReports();
       }).catch(function (err) {
@@ -4940,10 +5162,13 @@
       const currentIds = new Set(leads.map(function (l) { return l.id; }));
       const currentAttention = new Set(leads.filter(needsAttentionNow).map(function (l) { return l.id; }));
 
-      if (state.initial) {
+      // Data pertama (termasuk data dari cache offline) hanya dijadikan patokan; notifikasi baru
+      // dihitung setelah data dari server masuk, supaya lead yang masuk selama aplikasi tertutup
+      // tidak memunculkan banjir pop-up saat aplikasi dibuka.
+      if (state.initial || leadsSnapshotFromCache) {
         state.knownIds = currentIds;
         state.knownAttentionIds = currentAttention;
-        state.initial = false;
+        state.initial = leadsSnapshotFromCache;
         return;
       }
 
@@ -5387,7 +5612,15 @@
     // Logout
     // ------------------------------------------------------------
     function handleLogout() {
-      unregisterPushTokenForLogout().then(function () { auth.signOut(); });
+      unregisterPushTokenForLogout()
+        .then(function () { return auth.signOut(); })
+        .then(function () {
+          // Hapus cache offline akun ini dari perangkat (data lead tidak tertinggal di HP bersama).
+          if (!firestoreCacheOn) return;
+          return db.terminate().then(function () { return db.clearPersistence(); })
+            .catch(function (err) { console.warn('Gagal menghapus cache offline:', err); })
+            .then(function () { location.reload(); });
+        });
     }
 
     function cleanupLeadsListener() {
@@ -5463,6 +5696,29 @@
     let allLeadsReady = false;        // true setelah data mode 'semua' selesai dimuat
     let leadsHematUnavailable = false; // true kalau query mode hemat gagal (mis. indeks Firestore belum dibuat)
 
+    let leadsSnapshotFromCache = false;   // snapshot lead terakhir masih dari cache offline (belum dari server)
+
+    // Mode hemat TANPA baca dobel: lead AKTIF + lead SELESAI (Closing SPPR/Lost) yang masuk 90 hari terakhir.
+    // Dulu query kedua memuat SEMUA lead 90 hari terakhir, sehingga lead aktif terbaca dua kali.
+    // Butuh index gabungan (status + createdAt; marketing: assignedTo + status + createdAt). Kalau index
+    // belum ada, otomatis kembali ke query lama dulu, baru kemudian ke mode 'semua'.
+    let leadsLeanUnavailable = false;
+    function hematLeadQueries(base, activeQuery) {
+      const recent = leadsLeanUnavailable
+        ? base.where('createdAt', '>=', leadsWindowStart())
+        : base.where('status', 'in', CLOSED_STATUSES).where('createdAt', '>=', leadsWindowStart());
+      return { aktif: activeQuery(base), baru: recent };
+    }
+    function onHematQueryError(err, restart) {
+      if (!leadsLeanUnavailable) {
+        console.warn('Index lead hemat belum tersedia, memakai query lama:', err && err.message);
+        leadsLeanUnavailable = true;
+        restart();
+        return;
+      }
+      fallbackToAllLeads(err);
+    }
+
     function leadsWindowStart() {
       return firebase.firestore.Timestamp.fromMillis(Date.now() - LEADS_WINDOW_DAYS * 24 * 3600 * 1000);
     }
@@ -5483,10 +5739,12 @@
       let initialSent = false;
       let changedSince = new Set();
       let stopped = false;
+      const fromCache = {};            // nama query -> snapshot terakhir masih dari cache offline?
       const unsubs = keys.map(function (key) {
         members[key] = new Set();
-        return queries[key].onSnapshot(function (snapshot) {
+        return queries[key].onSnapshot({ includeMetadataChanges: true }, function (snapshot) {
           if (stopped) return;
+          fromCache[key] = !!(snapshot.metadata && snapshot.metadata.fromCache);
           snapshot.docChanges().forEach(function (ch) {
             const id = ch.doc.id;
             if (ch.type === 'removed') {
@@ -5504,6 +5762,7 @@
           initialSent = true;
           const changed = isInitial ? [] : Array.from(changedSince);
           changedSince = new Set();
+          leadsSnapshotFromCache = keys.some(function (k) { return fromCache[k]; });
           onData(Array.from(latest.values()), changed, isInitial);
         }, function (err) {
           if (stopped) return;
@@ -5576,7 +5835,7 @@
       const col = db.collection('leads');
       const queries = leadsLoadMode === 'semua'
         ? { semua: col }
-        : { aktif: col.where('status', 'not-in', CLOSED_STATUSES), baru: col.where('createdAt', '>=', leadsWindowStart()) };
+        : hematLeadQueries(col, function (q) { return q.where('status', 'not-in', CLOSED_STATUSES); });
       unsubscribeLeads = listenLeadQueries(queries, function (leads, changedIds, isInitial) {
         allLeadsData = leads.sort(function (a, b) { return leadCreatedMs(b) - leadCreatedMs(a); });
         renderMarketingGrid();
@@ -5593,7 +5852,7 @@
           refreshManageModalIfIdle('users');
         }
       }, function (err) {
-        if (leadsLoadMode === 'hemat') { fallbackToAllLeads(err); return; }
+        if (leadsLoadMode === 'hemat') { onHematQueryError(err, startCsLeadsQuery); return; }
         console.error('Gagal memuat leads:', err);
       });
     }
@@ -6962,7 +7221,7 @@
       const base = db.collection('leads').where('assignedTo', '==', name);
       const queries = leadsLoadMode === 'semua'
         ? { semua: base }
-        : { aktif: base.where('status', 'in', ACTIVE_LEAD_STATUSES), baru: base.where('createdAt', '>=', leadsWindowStart()) };
+        : hematLeadQueries(base, function (q) { return q.where('status', 'in', ACTIVE_LEAD_STATUSES); });
       unsubscribeLeads = listenLeadQueries(queries, function (docs) {
           // Lead yang belum ditekan "Terima" dipisah: tampil di kartu hitung mundur di atas, dan
           // TIDAK masuk daftar/filter/ekspor/notifikasi biasa sampai diterima.
@@ -6978,12 +7237,39 @@
           updateNotifBadge('marketing', marketingLeadsData);
           processRealtimeNotifications('marketing', marketingLeadsData);
       }, function (err) {
-        if (leadsLoadMode === 'hemat') { fallbackToAllLeads(err); return; }
+        if (leadsLoadMode === 'hemat') { onHematQueryError(err, function () { startMarketingLeadsQuery(name); }); return; }
         console.error('Gagal memuat lead marketing:', err);
       });
     }
 
+    // Lead aktif yang lama tidak di-update: diingatkan supaya ditandai Lost bila buyer sudah tidak
+    // berminat. Daftar lead aktif yang ringkas = aplikasi lebih cepat & hemat kuota baca.
+    const STALE_LEAD_DAYS = 45;
+    function renderStaleLeadBanner() {
+      const el = document.getElementById('marketingStaleBanner');
+      if (!el) return;
+      const cutoff = Date.now() - STALE_LEAD_DAYS * 86400000;
+      const n = marketingLeadsData.filter(function (l) {
+        return CLOSED_STATUSES.indexOf(l.status) === -1 && toJsDate(l.lastUpdated || l.createdAt).getTime() < cutoff;
+      }).length;
+      el.classList.toggle('hidden', !n);
+      if (!n) { el.innerHTML = ''; return; }
+      el.innerHTML = 'Ada <b>' + n + ' lead</b> yang tidak di-update lebih dari ' + STALE_LEAD_DAYS + ' hari. Kalau buyer sudah tidak berminat, ' +
+        'ubah statusnya ke <b>Lost (Batal)</b> supaya daftar lebih ringkas dan aplikasi lebih hemat.' +
+        '<button type="button" onclick="showStaleLeads()" class="block font-semibold text-[var(--brand-dark)] underline mt-1.5">Tampilkan lead tersebut</button>';
+    }
+
+    function showStaleLeads() {
+      document.getElementById('marketingFilterDateType').value = 'lastUpdated';
+      document.getElementById('marketingFilterDateFrom').value = '';
+      document.getElementById('marketingFilterDateTo').value = kpiDateKey(new Date(Date.now() - STALE_LEAD_DAYS * 86400000));
+      if (!marketingFilterPanelOpen) toggleMarketingFilterPanel();
+      marketingFilterState.activeOnly = true;   // hanya lead yang belum Closing SPPR / Lost
+      onMarketingFilterChange(true);
+    }
+
     function renderMarketingCards() {
+      renderStaleLeadBanner();
       const container = document.getElementById('marketingCardsContainer');
       const totalEl = document.getElementById('leadTotal');
       const perluTindakLanjut = marketingLeadsData.filter(function (l) { return CLOSED_STATUSES.indexOf(l.status) === -1; }).length;

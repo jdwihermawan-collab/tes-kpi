@@ -31,4 +31,13 @@ Laporan Online/Offline disimpan di `kpiReports/{uid}/kpiItems` (lihat `firestore
 Daftar index gabungan ada di `firestore.indexes.json` (sudah dibuat di project `tes-kpi-0f618c`):
 - `leads`: assignedTo + lastUpdated — KPI marketing hanya membaca lead yang berubah bulan itu (hemat read)
 - `leads`: assignedTo + createdAt — mode hemat daftar lead marketing
-Tanpa index, aplikasi tetap jalan (otomatis memakai query lengkap), hanya lebih boros read.
+- `leads`: status + createdAt — panel staf: lead selesai 90 hari terakhir (tanpa baca dobel)
+- `leads`: assignedTo + status + createdAt — panel marketing: idem
+Tanpa index, aplikasi tetap jalan (otomatis memakai query lama / lengkap), hanya lebih boros read.
+
+## Hemat kuota read
+- Cache offline Firestore (dibersihkan saat logout).
+- Daftar lead mode hemat: lead aktif + lead selesai 90 hari (tidak ada dokumen yang terbaca dua kali).
+- Rekap KPI harian `kpiDaily/{yyyy-mm}_{uid}`: menu KPI & barometer membaca rekap + perubahan setelah
+  tanggal rekap. Dibuat cron 00.05 WIB, atau oleh SPV/Super Admin saat pertama membuka KPI hari itu.
+- Riwayat lonceng 1 dokumen per akun; data KPI disimpan sementara 10 menit di perangkat.

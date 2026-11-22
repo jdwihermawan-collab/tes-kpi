@@ -58,7 +58,8 @@ function verifyStatus(lead, key) {
   return v && v.status ? v.status : 'pending';
 }
 
-function countLeads(leads, range) {
+// closings (opsional): diisi { leadId, stage, date } untuk setiap closing ITJ/SPPR pertama di rentang ini.
+function countLeads(leads, range, closings) {
   const c = { dbBaru: 0, followUp: 0, survey: 0, walkIn: 0, itj: 0, sppr: 0 };
   const inRange = function (ms) { return !!ms && ms >= range.start && ms < range.end; };
   leads.forEach(function (l) {
@@ -83,6 +84,10 @@ function countLeads(leads, range) {
     if (inRange(firstSurvey)) c.survey++;
     if (inRange(firstItj) && verifyStatus(l, 'itj') === 'approved') c.itj++;
     if (inRange(firstSppr) && verifyStatus(l, 'sppr') === 'approved') c.sppr++;
+    if (closings) {
+      if (inRange(firstItj)) closings.push({ leadId: l.id, stage: 'itj', date: firstItj });
+      if (inRange(firstSppr)) closings.push({ leadId: l.id, stage: 'sppr', date: firstSppr });
+    }
   });
   return c;
 }
@@ -119,6 +124,31 @@ async function monthKpi(ym, marketingUsers) {
   return { range: range, items: items, rows: rows };
 }
 
+// Rekap harian (kpiDaily): hitungan sampai akhir hari asOf (WIB) untuk setiap marketing.
+// Aturannya sama dengan kpiMakeSnap di aplikasi. Dipanggil cron 00.05 WIB untuk "kemarin".
+async function dailySnapshots(ym, asOf, marketingUsers) {
+  const range = monthRange(ym);
+  const p = asOf.split('-');
+  const end = Date.UTC(Number(p[0]), Number(p[1]) - 1, Number(p[2]) + 1) - WIB_MS;
+  const leads = (await L.db().collection('leads').where('lastUpdated', '>=', L.Timestamp.fromMillis(range.start)).get())
+    .docs.map(function (d) { return Object.assign({ id: d.id }, d.data()); });
+  const out = [];
+  for (const u of marketingUsers) {
+    const reps = (await L.db().collection('kpiReports').doc(u.uid).collection('kpiItems')
+      .where('dateKey', '>=', range.firstKey).where('dateKey', '<=', asOf).get())
+      .docs.map(function (d) { return d.data(); });
+    const closings = [];
+    const c = countLeads(leads.filter(function (l) { return l.assignedTo === u.name; }), { start: range.start, end: end }, closings);
+    out.push({
+      uid: u.uid, ym: ym, name: u.name, asOf: asOf,
+      counts: { dbBaru: c.dbBaru, followUp: c.followUp, survey: c.survey, walkIn: c.walkIn },
+      onlineDays: Array.from(new Set(reps.filter(function (r) { return !r.invalid; }).map(function (r) { return r.dateKey; }))),
+      closings: closings
+    });
+  }
+  return out;
+}
+
 function fmt1(n) { return String(Math.round(n * 10) / 10).replace('.', ','); }
 
-module.exports = { KPI_DEFAULTS, kpiItems, monthRange, countLeads, score, monthKpi, fmt1, MONTH_NAMES };
+module.exports = { KPI_DEFAULTS, kpiItems, monthRange, countLeads, score, monthKpi, dailySnapshots, fmt1, MONTH_NAMES };

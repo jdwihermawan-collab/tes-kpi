@@ -119,6 +119,13 @@ service cloud.firestore {
       allow delete: if isSuper() || (isMarketing() && isSelf(uid) && resource.data.get('invalid', false) == false);
     }
 
+    // ---------- Rekap KPI harian: kpiDaily/{yyyy-mm}_{uid} (hemat read saat membuka KPI) ----------
+    // Ditulis server (cron 00.05 WIB) atau SPV/Super Admin. Marketing hanya membaca rekap miliknya.
+    match /kpiDaily/{docId} {
+      allow read: if isStaff() || (isActive() && docId.matches('^[0-9]{4}-[0-9]{2}_' + request.auth.uid + '$'));
+      allow write: if isActive() && me().role in ['Admin', 'SuperAdmin'];
+    }
+
     // ---------- Rekap KPI bulanan untuk grafik tren: 1 dokumen per marketing ----------
     // Ditulis server (cron tanggal 3) atau SPV/Super Admin lewat tombol "Simpan ke grafik tren".
     match /kpiHistory/{uid} {
