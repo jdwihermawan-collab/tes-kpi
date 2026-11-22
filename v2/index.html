@@ -674,14 +674,14 @@ function updateBell() {
 }
 
 // ---------- Target harian (beranda marketing) ----------
-// Target harian = target bulanan / 25 hari kerja (patokan presensi KPI lama). Hari kerja = Senin–Sabtu.
-// "Butuh X per hari" = sisa target bulan ini / sisa hari kerja (termasuk hari ini).
+// Target harian = target bulanan / 25 hari kerja (patokan presensi KPI lama).
+// Libur marketing tidak menentu (4x sebulan), jadi "Butuh X per hari" baru tampil mulai tanggal 25:
+// sisa target bulan ini / sisa hari di bulan ini (termasuk hari ini).
 const KPI_WORKDAYS = 25;
+const KPI_NEED_FROM_DAY = 25;
 function workdaysLeft() {
   const n = new Date(), last = new Date(n.getFullYear(), n.getMonth() + 1, 0).getDate();
-  let c = 0;
-  for (let d = n.getDate(); d <= last; d++) if (new Date(n.getFullYear(), n.getMonth(), d).getDay() !== 0) c++;
-  return Math.max(1, c);
+  return Math.max(1, last - n.getDate() + 1);
 }
 function todayCounts(r) {
   const key = kpiDateKey(new Date());
@@ -699,7 +699,7 @@ function todaySection() {
   if (!myKpi || myKpi.month !== kpiCurrentMonth()) return '';
   const r = myKpi.rows[0], items = kpiItems(), today = todayCounts(r), left = workdaysLeft();
   if (!r.reports) kpiFetchRowReports(r, false);
-  const isSunday = new Date().getDay() === 0;
+  const showNeed = new Date().getDate() >= KPI_NEED_FROM_DAY;
   const rows = ['followUp', 'dbBaru', 'online'].map(function (key) {
     const it = items.find(function (x) { return x.key === key; });
     if (!it) return '';
@@ -708,8 +708,9 @@ function todaySection() {
     const need = Math.ceil(remaining / left);
     let note = '';
     if (!remaining) note = '<div class="tiny" style="color:#1F7A4D;margin-top:6px">Target bulan ini sudah tercapai</div>';
+    else if (!showNeed) note = '';
     else if (key === 'online') {
-      if (remaining >= left) note = '<div class="tiny" style="color:#A55E00;margin-top:6px">' + (remaining > left ? 'Lapor setiap hari kerja tersisa, maksimal tercapai ' + ((Number(r.counts.online) || 0) + left) + ' dari ' + it.target + ' hari' : 'Butuh lapor setiap hari kerja tersisa') + '</div>';
+      if (remaining >= left) note = '<div class="tiny" style="color:#A55E00;margin-top:6px">' + (remaining > left ? 'Lapor setiap hari tersisa, maksimal tercapai ' + ((Number(r.counts.online) || 0) + left) + ' dari ' + it.target + ' hari' : 'Butuh lapor setiap hari tersisa') + '</div>';
     } else if (need > daily) note = '<div class="tiny" style="color:#A55E00;margin-top:6px">Butuh ' + need + ' per hari agar target bulan ini tercapai</div>';
     if (key === 'online') {
       const done = today.online;
@@ -721,7 +722,7 @@ function todaySection() {
       '<b class="num">' + v + '<span class="muted" style="font-weight:400"> / ' + daily + '</span></b></div>' +
       '<div class="bar"><i style="width:' + Math.min(100, v / daily * 100) + '%;background:' + (ok ? 'var(--green)' : 'var(--tint)') + '"></i></div>' + note + '</div>';
   }).join('');
-  return '<div class="section-h"><h2>Hari ini</h2><span class="muted tiny">' + (isSunday ? 'Minggu libur · ' : '') + 'Sisa ' + left + ' hari kerja' + '</span></div><div class="group">' + rows + '</div>';
+  return '<div class="section-h"><h2>Hari ini</h2><span class="muted tiny">' + 'Sisa ' + left + ' hari bulan ini' + '</span></div><div class="group">' + rows + '</div>';
 }
 
 // ---------- Beranda marketing ----------
