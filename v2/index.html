@@ -294,7 +294,7 @@ function sheetHead(title, rightHtml, leftLabel) {
   return '<div class="sheet-head"><div class="side"><button class="btn-plain" onclick="closeSheet()">' + (leftLabel || 'Tutup') + '</button></div><h3>' + title + '</h3><div class="side r">' + (rightHtml || '') + '</div></div>';
 }
 // Sheet yang berisi formulir tidak di-render ulang otomatis saat data berubah (isian tidak hilang).
-function sheetIsForm() { return sheetState && ['update', 'newLead', 'report', 'pdf', 'broadcast', 'waRemind'].indexOf(sheetState.kind) !== -1; }
+function sheetIsForm() { return sheetState && ['update', 'newLead', 'report', 'pdf', 'broadcast', 'waRemind', 'manage', 'kpiSettings', 'testPush'].indexOf(sheetState.kind) !== -1; }
 
 // =====================================================================
 // Login & sesi
@@ -375,6 +375,8 @@ function startSession() {
       usersData = s.docs.map(function (d) { return Object.assign({ uid: d.id }, d.data()); });
       if (role === 'staff' && !teamKpi) loadTeamKpi(false);
       rerender();
+      const mf = sheetState && sheetState.kind === 'manage' ? sheetState.form : null;
+      if (mf && mf.view === 'list' && !mf.busy) renderSheet();
     }, function (err) { console.error(err); }));
     unsubs.push(db.collection('settings').doc('adRotation').onSnapshot(function (s) {
       adRotation = s.exists ? { counter: Number(s.data().counter) || 0, queue: Array.isArray(s.data().queue) ? s.data().queue : null } : { counter: null, queue: null };
@@ -1153,13 +1155,13 @@ function csNotifyWa(leadId) {
 function moreScreen() {
   const roleLabel = { Marketing: 'Marketing', Admin: 'SPV / Manager', SuperAdmin: 'Super Admin', CS: 'CS' }[currentUser.role] || currentUser.role;
   const pushOn = !pushUnsupportedReason() && 'Notification' in window && Notification.permission === 'granted';
-  const old = function (t, s) { return '<a class="row" href="/"><div class="main"><div class="t">' + t + '</div><div class="s">' + s + '</div></div>' + chev + '</a>'; };
+  const sheetRow = function (k, t, s) { return '<button class="row" onclick="openSheet(\'' + k + '\')"><div class="main"><div class="t">' + t + '</div><div class="s">' + s + '</div></div>' + chev + '</button>'; };
   const staffLinks = role === 'staff' ? '<div class="section-h"><h2>Fitur lanjutan</h2></div><div class="group">' +
     '<button class="row" onclick="openSheet(\'broadcast\')"><div class="main"><div class="t">Kirim Notif</div><div class="s">Peringatan / pengumuman ke HP marketing</div></div>' + chev + '</button>' +
     '<button class="row" onclick="openSheet(\'waRemind\')"><div class="main"><div class="t">Kirim Pengingat WA</div><div class="s">Rekap lead jatuh tempo per marketing</div></div>' + chev + '</button>' +
     '<button class="row" onclick="openSheet(\'riwayat\')"><div class="main"><div class="t">Riwayat Input</div><div class="s">Lead umum, iklan & spam dari CS</div></div>' + chev + '</button>' +
-    (currentUser.role === 'SuperAdmin' ? old('Kelola Akun & Proyek', 'Tambah / ubah akun, daftar proyek, reset data') + old('Atur Target KPI', 'Target & bobot 7 indikator') + old('Tes Push', 'Uji notifikasi ke HP') : '') +
-    '</div><p class="foot">Kirim Notif & Pengingat WA terbuka di sini. Fitur lainnya dibuka di tampilan lama (lebih nyaman di laptop), login yang sama.</p>' : '';
+    (currentUser.role === 'SuperAdmin' ? sheetRow('manage', 'Kelola Akun & Proyek', 'Tambah / ubah akun, daftar proyek, reset data') + sheetRow('kpiSettings', 'Atur Target KPI', 'Target & bobot 7 indikator') + sheetRow('testPush', 'Tes Push', 'Uji notifikasi ke HP') : '') +
+    '</div>' : '';
   return '<div class="group"><div class="row ind"><div class="avatar" style="background:var(--tint)">' + esc(initials(currentUser.name)) + '</div><div class="main"><div class="t">' + esc(currentUser.name) + '</div><div class="s">' + esc(roleLabel) + ' · ' + esc(String(currentUser.email || '').split('@')[0]) + '</div></div></div></div>' +
     '<div class="section-h"><h2>Pengaturan</h2></div><div class="group">' +
       '<div class="row"><div class="main"><div class="t">Notifikasi push</div><div class="s">' + (pushOn ? 'Aktif di perangkat ini' : esc(pushUnsupportedReason() || 'Belum aktif')) + '</div></div>' + (pushOn ? '<span class="pill p-green">Aktif</span>' : (pushUnsupportedReason() ? '' : '<button class="btn-plain" onclick="enablePush()">Aktifkan</button>')) + '</div>' +
@@ -1173,6 +1175,636 @@ function moreScreen() {
 // Sheets
 // =====================================================================
 const SHEETS = {};
+
+// =====================================================================
+// Super Admin: Kelola Akun & Proyek, Reset Data, Atur Target KPI, Tes Push
+// Logika sama dengan tampilan lama (index.html: renderManageModal dkk).
+// =====================================================================
+const ROLE_LABELS = { SuperAdmin: 'Super Admin', Admin: 'SPV/Manager', CS: 'CS', Marketing: 'Marketing' };
+const MANAGE_ROLE_ORDER = ['SuperAdmin', 'Admin', 'CS', 'Marketing'];
+let manageAllLeads = null;          // SEMUA lead (termasuk Closed/Lost lama) — dimuat saat Kelola Akun dibuka
+let credentialsData = {};
+function isSuperAdminUser() { return !!currentUser && currentUser.role === 'SuperAdmin'; }
+function emailToId(email) {
+  const e = String(email || ''), suffix = '@' + String(APP.emailDomain || '').toLowerCase();
+  return e.toLowerCase().slice(-suffix.length) === suffix ? e.slice(0, -suffix.length) : e;
+}
+function findUserByUid(uid) { return usersData.find(function (u) { return u.uid === uid; }) || null; }
+function mgLeads() { return manageAllLeads || allLeadsData; }
+function activeLeadsOf(name) { return mgLeads().filter(function (l) { return l.assignedTo === name && CLOSED_STATUSES.indexOf(l.status) === -1; }); }
+function allLeadsOf(name) { return mgLeads().filter(function (l) { return l.assignedTo === name; }); }
+function nextRotationOrder() {
+  let max = 0;
+  usersData.forEach(function (u) { if (u.role === 'Marketing' && Number.isFinite(u.rotationOrder)) max = Math.max(max, u.rotationOrder); });
+  return max + 1;
+}
+function randomPassword() {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789', buf = new Uint32Array(10);
+  (window.crypto || window.msCrypto).getRandomValues(buf);
+  return Array.from(buf).map(function (n) { return chars[n % chars.length]; }).join('');
+}
+function authErrorMessage(err) {
+  const code = err && err.code;
+  if (code === 'auth/email-already-in-use') return 'ID ini sudah terdaftar. Kalau akunnya pernah dinonaktifkan, aktifkan lagi dari daftar akun nonaktif.';
+  if (code === 'auth/invalid-email') return 'Format email tidak valid.';
+  if (code === 'auth/weak-password') return 'Password terlalu lemah (minimal 6 karakter).';
+  if (code === 'auth/operation-not-allowed') return 'Login Email/Password belum diaktifkan di Firebase Console (Authentication > Sign-in method).';
+  if (code === 'auth/network-request-failed') return 'Koneksi internet bermasalah, coba lagi.';
+  if (code === 'auth/user-not-found') return 'Akun login dengan email ini tidak ditemukan.';
+  return (err && err.message) || String(err);
+}
+function getUserAdminAuth() {
+  const existing = firebase.apps.find(function (a) { return a.name === 'userAdmin'; });
+  return (existing || firebase.initializeApp(APP.firebase, 'userAdmin')).auth();
+}
+function credentialDoc(email, password) { return { email: email, password: password, updatedAt: FieldValue.serverTimestamp(), updatedBy: currentUser ? currentUser.uid : '' }; }
+function createLoginAccount(email, password, profile) {
+  const auth2 = getUserAdminAuth();
+  return auth2.setPersistence(firebase.auth.Auth.Persistence.NONE)
+    .then(function () { return auth2.createUserWithEmailAndPassword(email, password); })
+    .then(function (cred) {
+      const nu = cred.user, batch = db.batch();
+      batch.set(db.collection('users').doc(nu.uid), profile);
+      batch.set(db.collection('credentials').doc(nu.uid), credentialDoc(email, password));
+      return batch.commit().catch(function (err) { return nu.delete().catch(function () {}).then(function () { throw err; }); });
+    })
+    .finally(function () { return auth2.signOut().catch(function () {}); });
+}
+function commitInChunks(items, applyFn) {
+  const chunks = [];
+  for (let i = 0; i < items.length; i += 400) chunks.push(items.slice(i, i + 400));
+  return chunks.reduce(function (prev, chunk) {
+    return prev.then(function () { const b = db.batch(); chunk.forEach(function (it) { applyFn(b, it); }); return b.commit(); });
+  }, Promise.resolve());
+}
+function copyText(text, btn) {
+  const done = function () { if (btn) btn.textContent = 'Tersalin ✓'; };
+  if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(done).catch(function () { alert('Gagal menyalin, salin manual dari kotak di atas.'); });
+  else alert('Browser tidak mendukung salin otomatis, salin manual dari kotak di atas.');
+}
+
+// ---------- Sheet Kelola Akun & Proyek ----------
+function mgForm() { return sheetState && sheetState.kind === 'manage' ? sheetState.form : null; }
+function mgGo(view, extra) { const f = mgForm(); if (!f || f.busy) return; Object.assign(f, { view: view, notice: '', err: '' }, extra || {}); renderSheet(); $('sheet').scrollTop = 0; }
+function mgTab(tab) { const f = mgForm(); if (!f || f.busy) return; f.tab = tab; f.view = 'list'; f.notice = ''; renderSheet(); }
+function mgBusy(on, btnId, label) { const f = mgForm(); if (f) f.busy = on; if (btnId && $(btnId)) { $(btnId).disabled = on; if (label) $(btnId).textContent = label; } }
+function mgLoadData() {
+  const f = mgForm();
+  if (!f) return;
+  f.loading = true;
+  Promise.all([
+    db.collection('leads').get().then(function (s) { manageAllLeads = s.docs.map(function (d) { return Object.assign({ id: d.id }, d.data()); }); }),
+    db.collection('credentials').get().then(function (s) { credentialsData = {}; s.docs.forEach(function (d) { credentialsData[d.id] = d.data(); }); })
+      .catch(function (e) { console.warn('Tidak bisa membaca credentials:', e); })
+  ]).catch(function (e) { f.loadErr = e.message; })
+    .finally(function () { f.loading = false; if (mgForm() === f) renderSheet(); });
+}
+function mgBtn(label, js, kind) {
+  return '<button class="btn ' + (kind === 'danger' ? 'btn-danger' : kind === 'primary' ? 'btn-primary' : 'btn-tinted') + '" style="width:auto;height:32px;padding:0 12px;font-size:13.5px" onclick="' + js + '">' + label + '</button>';
+}
+function mgNotice(f) { return f.notice ? '<div class="card" style="background:var(--green-soft);color:#1F7A4D;padding:12px 16px;margin-bottom:12px;font-size:14.5px">' + esc(f.notice) + '</div>' : ''; }
+function mgErr(f) { return f.err ? '<p class="err">' + esc(f.err) + '</p>' : ''; }
+SHEETS.manage = function () {
+  if (!isSuperAdminUser()) return sheetHead('Kelola Akun') + '<div class="card empty">Khusus Super Admin.</div>';
+  const f = sheetState.form;
+  if (!f.init) { f.init = true; f.tab = 'users'; f.view = 'list'; mgLoadData(); }
+  const back = f.view !== 'list' ? '<button class="btn-plain" onclick="mgGo(\'list\')">Kembali</button>' : '';
+  const seg = f.view === 'list' ? '<div class="seg" style="margin-top:0;margin-bottom:12px"><button class="' + (f.tab === 'users' ? 'on' : '') + '" onclick="mgTab(\'users\')">Akun</button><button class="' + (f.tab === 'projects' ? 'on' : '') + '" onclick="mgTab(\'projects\')">Proyek</button><button class="' + (f.tab === 'reset' ? 'on' : '') + '" onclick="mgTab(\'reset\')">Reset Data</button></div>' : '';
+  let body;
+  if (f.tab === 'projects') body = mgProjects(f);
+  else if (f.tab === 'reset') body = mgReset(f);
+  else if (f.loading) body = '<div class="loading">Memuat semua data lead & akun…</div>';
+  else if (f.view === 'add' || f.view === 'edit') body = mgUserForm(f);
+  else if (f.view === 'created') body = mgCreated(f);
+  else if (f.view === 'setPassword') body = mgSetPassword(f);
+  else if (f.view === 'deactivate') body = mgDeactivate(f);
+  else if (f.view === 'purge') body = mgPurge(f);
+  else if (f.view === 'bulk') body = mgBulk(f);
+  else if (f.view === 'bulkResult') body = mgBulkResult(f);
+  else body = mgUserList(f);
+  return sheetHead('Kelola Akun & Proyek', back) + seg + body;
+};
+
+// ---------- Daftar akun ----------
+function mgUserList(f) {
+  const inactive = usersData.filter(function (u) { return !isActiveUser(u); }).length;
+  const visible = usersData.filter(function (u) { return f.showInactive || isActiveUser(u); });
+  let html = mgNotice(f) + (f.loadErr ? '<p class="err">Gagal memuat data: ' + esc(f.loadErr) + '</p>' : '') +
+    '<div class="grid2"><button class="btn btn-primary" style="height:42px;font-size:15px" onclick="mgGo(\'add\')">+ Tambah Akun</button><button class="btn btn-tinted" style="height:42px;font-size:15px" onclick="mgGo(\'bulk\')">Impor Banyak</button></div>' +
+    (inactive ? '<button class="btn-plain tiny" style="margin-top:10px" onclick="sheetState.form.showInactive=!sheetState.form.showInactive;renderSheet()">' + (f.showInactive ? 'Sembunyikan' : 'Tampilkan') + ' akun nonaktif (' + inactive + ')</button>' : '');
+  MANAGE_ROLE_ORDER.concat(['__other__']).forEach(function (r) {
+    const list = visible.filter(function (u) { return r === '__other__' ? MANAGE_ROLE_ORDER.indexOf(u.role) === -1 : u.role === r; }).sort(function (a, b) {
+      if (r === 'Marketing') { const oa = Number.isFinite(a.rotationOrder) ? a.rotationOrder : 9999, ob = Number.isFinite(b.rotationOrder) ? b.rotationOrder : 9999; if (oa !== ob) return oa - ob; }
+      return String(a.name || '').localeCompare(String(b.name || ''));
+    });
+    if (!list.length) return;
+    html += '<div class="section-h"><h2 style="font-size:17px">' + esc(r === '__other__' ? 'Role tidak dikenal' : ROLE_LABELS[r]) + ' (' + list.length + ')</h2></div><div class="group">' + list.map(mgUserRow).join('') + '</div>';
+  });
+  return html;
+}
+function mgUserRow(u) {
+  const isMe = u.uid === currentUser.uid, active = isActiveUser(u), uid = esc(u.uid);
+  let meta = 'ID: ' + esc(emailToId(u.email) || '-');
+  if (u.role === 'Marketing') meta += ' · Grup ' + (u.group === 'B' ? 'B' : 'A') + ' · ' + (u.inRotation === false ? 'tidak ikut rotasi' : 'rotasi #' + (Number.isFinite(u.rotationOrder) ? u.rotationOrder : '-')) + ' · WA ' + esc(u.waNumber || '-') + ' · ' + activeLeadsOf(u.name).length + ' lead aktif';
+  const warn = u.role === 'Marketing' && active && validateWaNumber(u.waNumber || '') ? '<div class="s wrap" style="color:#A55E00">Nomor WA belum valid, pengingat WA tidak bisa dikirim.</div>' : '';
+  const b = [];
+  if (active) {
+    b.push(mgBtn('Ubah', "mgGo('edit',{uid:'" + uid + "'})"));
+    if (credentialsData[u.uid]) { b.push(mgBtn('Lihat Password', "mgShowPassword('" + uid + "')")); if (!isMe) b.push(mgBtn('Atur Ulang Password', "mgGo('setPassword',{uid:'" + uid + "'})")); }
+    else b.push(mgBtn('Reset Password (email)', "mgSendReset('" + uid + "')"));
+    if (!isMe) b.push(mgBtn('Nonaktifkan', "mgStartDeactivate('" + uid + "')", 'danger'));
+  } else {
+    b.push(mgBtn('Aktifkan Lagi', "mgReactivate('" + uid + "')", 'primary'));
+    if (!isMe) b.push(mgBtn('Hapus Permanen', "mgGo('purge',{uid:'" + uid + "'})", 'danger'));
+  }
+  return '<div class="row" style="flex-direction:column;align-items:stretch;gap:8px' + (active ? '' : ';opacity:.75') + '"><div class="main"><div class="t">' + esc(u.name || '(tanpa nama)') + (isMe ? ' <span class="muted tiny">(Anda)</span>' : '') + (active ? '' : ' <span class="pill p-gray">Nonaktif</span>') + '</div>' +
+    '<div class="s wrap">' + meta + '</div>' + warn + '</div><div class="hstack" style="gap:6px;flex-wrap:wrap">' + b.join('') + '</div></div>';
+}
+
+// ---------- Form tambah / ubah akun ----------
+function mgUserForm(f) {
+  const isEdit = f.view === 'edit', u = isEdit ? findUserByUid(f.uid) : null;
+  if (isEdit && !u) return mgUserList(f);
+  const isMe = isEdit && u.uid === currentUser.uid, r = f.role || (u ? u.role : 'Marketing');
+  const nameLocked = isEdit && u.role === 'Marketing' && allLeadsOf(u.name).length > 0;
+  const v = function (x) { return esc(x == null ? '' : x); };
+  const roleOpts = MANAGE_ROLE_ORDER.slice().reverse().map(function (x) { return '<option value="' + x + '"' + (x === r ? ' selected' : '') + '>' + ROLE_LABELS[x] + '</option>'; }).join('');
+  return '<h3 style="margin:0 0 12px;font-size:19px">' + (isEdit ? 'Ubah Akun: ' + v(u.name) : 'Tambah Akun Baru') + '</h3>' +
+    '<label class="field"><span>Nama</span><input id="ufName" maxlength="60" value="' + v(u && u.name) + '"' + (nameLocked ? ' readonly' : '') + ' placeholder="Budi"></label>' +
+    '<p class="foot">' + (nameLocked ? 'Nama marketing ini tidak bisa diubah karena sudah tercatat sebagai pemilik lead.' : 'Untuk marketing, nama ini tampil di data lead & pesan WA, dan harus unik.') + '</p>' +
+    '<label class="field"><span>Role</span><select id="ufRole" onchange="mgCaptureUser();sheetState.form.role=this.value;renderSheet()"' + (isMe ? ' disabled' : '') + '>' + roleOpts + '</select></label>' +
+    '<p class="foot">' + (isMe ? 'Role akun Anda sendiri tidak bisa diubah.' : 'SPV/Manager & Super Admin: memantau semua lead. CS: input lead. Marketing: follow-up lead miliknya.') + '</p>' +
+    (isEdit ? '<div class="card" style="padding:12px 16px;margin-top:10px"><div class="muted tiny">ID login</div><div>' + v(emailToId(u.email) || '-') + '</div></div>'
+      : '<label class="field"><span>ID login</span><input id="ufId" autocomplete="off" autocapitalize="none" spellcheck="false" value="' + v(f.draftId) + '" placeholder="angga"></label><p class="foot">Huruf kecil/angka tanpa spasi. Dipakai untuk login.</p>' +
+        '<div class="hstack" style="gap:8px;margin-top:10px"><label class="field" style="flex:1;margin:0"><span>Password awal</span><input id="ufPw" autocomplete="new-password" value="' + v(f.draftPw) + '" placeholder="Minimal 6 karakter"></label><button class="btn btn-tinted" style="width:auto;padding:0 14px;height:52px" onclick="$(\'ufPw\').value=randomPassword()">Acak</button></div>') +
+    (r === 'Marketing' ? '<div class="section-h"><h2 style="font-size:17px">Data marketing</h2></div>' +
+      '<label class="field"><span>Nomor WhatsApp</span><input id="ufWa" type="tel" value="' + v(f.draftWa != null ? f.draftWa : u && u.waNumber) + '" placeholder="0812xxxxxxx"></label>' +
+      '<div class="grid2" style="margin-top:10px"><label class="field"><span>Grup pengingat</span><select id="ufGroup"><option value="A"' + (!u || u.group !== 'B' ? ' selected' : '') + '>Grup A</option><option value="B"' + (u && u.group === 'B' ? ' selected' : '') + '>Grup B</option></select></label>' +
+      '<label class="field"><span>Urutan rotasi</span><input id="ufOrder" type="number" min="1" step="1" value="' + v(u && Number.isFinite(u.rotationOrder) ? u.rotationOrder : nextRotationOrder()) + '"></label></div>' +
+      '<label class="row card" style="margin-top:10px;padding:12px 16px;min-height:0"><input id="ufRot" type="checkbox"' + (!u || u.inRotation !== false ? ' checked' : '') + ' style="width:20px;height:20px"><div class="main"><div class="t">Ikut rotasi lead iklan</div><div class="s wrap">Lead dari input Iklan dibagi bergiliran ke marketing yang dicentang.</div></div></label>' : '') +
+    mgErr(f) + '<button class="btn btn-primary" style="margin-top:16px" id="ufSave" onclick="mgSubmitUser()">' + (isEdit ? 'Simpan Perubahan' : 'Buat Akun') + '</button>';
+}
+function mgCaptureUser() { const f = mgForm(); if (!f) return; if ($('ufId')) f.draftId = $('ufId').value; if ($('ufPw')) f.draftPw = $('ufPw').value; if ($('ufWa')) f.draftWa = $('ufWa').value; }
+function mgFail(msg) { const f = mgForm(); mgCaptureUser(); f.err = msg; renderSheet(); }
+function mgSubmitUser() {
+  const f = mgForm();
+  if (!isSuperAdminUser() || !f || f.busy) return;
+  const isEdit = f.view === 'edit', u = isEdit ? findUserByUid(f.uid) : null;
+  if (isEdit && !u) return mgGo('list');
+  const name = $('ufName').value.trim().replace(/\s+/g, ' '), isMe = isEdit && u.uid === currentUser.uid;
+  const r = isMe ? u.role : $('ufRole').value;
+  if (!name) return mgFail('Nama wajib diisi.');
+  if (MANAGE_ROLE_ORDER.indexOf(r) === -1) return mgFail('Pilih role yang valid.');
+  if (isEdit && u.role === 'Marketing') {
+    if (name !== u.name && allLeadsOf(u.name).length) return mgFail('Nama marketing tidak bisa diubah karena sudah memegang lead.');
+    const aktif = activeLeadsOf(u.name).length;
+    if (r !== 'Marketing' && aktif) return mgFail(u.name + ' masih memegang ' + aktif + ' lead aktif. Pindahkan dulu lead-nya (lewat Nonaktifkan) sebelum mengganti role.');
+  }
+  let mk = null;
+  if (r === 'Marketing') {
+    const wa = $('ufWa').value.trim(), waErr = validateWaNumber(wa);
+    if (waErr) return mgFail(waErr);
+    const dup = usersData.find(function (x) { return x.role === 'Marketing' && (!u || x.uid !== u.uid) && String(x.name || '').trim().toLowerCase() === name.toLowerCase(); });
+    if (dup) return mgFail('Nama marketing "' + name + '" sudah dipakai' + (isActiveUser(dup) ? '' : ' oleh akun nonaktif') + '. Nama marketing harus unik. Tambahkan pembeda, mis. "' + name + ' R".');
+    const ord = parseInt($('ufOrder').value, 10);
+    mk = { waNumber: wa, group: $('ufGroup').value === 'B' ? 'B' : 'A', inRotation: $('ufRot').checked, rotationOrder: Number.isFinite(ord) && ord > 0 ? ord : nextRotationOrder() };
+  }
+  if (isEdit) {
+    mgBusy(true, 'ufSave', 'Menyimpan…');
+    db.collection('users').doc(u.uid).update(Object.assign({ name: name, role: r, updatedAt: FieldValue.serverTimestamp(), updatedBy: currentUser.uid }, mk || {}))
+      .then(function () { f.busy = false; mgGo('list'); f.notice = 'Perubahan akun ' + name + ' tersimpan.'; renderSheet(); })
+      .catch(function (e) { f.busy = false; mgFail('Gagal menyimpan: ' + e.message); });
+    return;
+  }
+  const rawId = $('ufId').value.trim().toLowerCase(), email = idToEmail(rawId), pw = $('ufPw').value;
+  if (!isValidLoginId(rawId)) return mgFail('ID hanya boleh huruf kecil, angka, titik, strip, atau garis bawah (3-30 karakter), tanpa spasi.');
+  if (usersData.some(function (x) { return String(x.email || '').toLowerCase() === email; })) return mgFail('ID "' + rawId + '" sudah dipakai.');
+  if (pw.length < 6) return mgFail('Password minimal 6 karakter.');
+  const profile = Object.assign({ name: name, email: email, role: r, active: true, createdAt: FieldValue.serverTimestamp(), createdBy: currentUser.uid, updatedAt: FieldValue.serverTimestamp() }, mk || {});
+  mgBusy(true, 'ufSave', 'Membuat akun…');
+  createLoginAccount(email, pw, profile)
+    .then(function () { f.busy = false; credentialsData = credentialsData || {}; mgGo('created', { created: { name: name, email: email, password: pw, role: r }, draftId: '', draftPw: '', draftWa: null, role: null }); mgLoadData(); })
+    .catch(function (e) { f.busy = false; mgFail('Gagal membuat akun: ' + authErrorMessage(e)); });
+}
+function mgCreated(f) {
+  const c = f.created;
+  if (!c) return mgUserList(f);
+  const link = APP.crmUrl ? String(APP.crmUrl).replace(/\/+$/, '') + '/v2/' : '';
+  const text = 'Akun ' + APP.appName + '\nNama: ' + c.name + '\nRole: ' + (ROLE_LABELS[c.role] || c.role) + '\nID: ' + emailToId(c.email) + '\nPassword: ' + c.password + (link ? '\nLink: ' + link : '');
+  const title = c.mode === 'view' ? 'Data login ' + c.name : c.mode === 'reset' ? 'Password ' + c.name + ' berhasil diatur ulang.' : 'Akun ' + c.name + ' berhasil dibuat.';
+  f.copyText = text;
+  return '<div class="card" style="background:var(--green-soft);color:#1F7A4D"><div style="font-weight:600">' + esc(title) + '</div><div class="small" style="margin-top:4px">Berikan data login ini ke yang bersangkutan. Password bisa dilihat lagi lewat "Lihat Password".</div></div>' +
+    '<pre class="card" style="white-space:pre-wrap;word-break:break-word;font-size:14.5px;margin-top:12px;font-family:inherit">' + esc(text) + '</pre>' +
+    '<div class="grid2" style="margin-top:12px"><button class="btn btn-tinted" onclick="copyText(sheetState.form.copyText,this)">Salin</button><button class="btn btn-primary" onclick="mgGo(\'list\')">Daftar Akun</button></div>';
+}
+function mgShowPassword(uid) {
+  const u = findUserByUid(uid), c = credentialsData[uid];
+  if (!u || !c) return;
+  mgGo('created', { created: { name: u.name, email: u.email || c.email, password: c.password, role: u.role, mode: 'view' } });
+}
+function mgSetPassword(f) {
+  const u = findUserByUid(f.uid);
+  if (!u) return mgUserList(f);
+  return '<h3 style="margin:0 0 6px;font-size:19px">Atur Ulang Password: ' + esc(u.name) + '</h3><p class="foot" style="margin-top:0">ID: ' + esc(emailToId(u.email)) + '. Password lama langsung tidak berlaku. Sesi yang sedang login tetap jalan sampai logout.</p>' +
+    '<div class="hstack" style="gap:8px;margin-top:10px"><label class="field" style="flex:1;margin:0"><span>Password baru</span><input id="spPw" autocomplete="new-password" placeholder="Minimal 6 karakter"></label><button class="btn btn-tinted" style="width:auto;padding:0 14px;height:52px" onclick="$(\'spPw\').value=randomPassword()">Acak</button></div>' +
+    mgErr(f) + '<button class="btn btn-primary" style="margin-top:16px" id="spSave" onclick="mgApplyPassword()">Simpan Password</button>';
+}
+function mgApplyPassword() {
+  const f = mgForm(), u = findUserByUid(f.uid), c = credentialsData[f.uid], pw = $('spPw').value;
+  if (!u || !c || f.busy) return;
+  if (pw.length < 6) { f.err = 'Password minimal 6 karakter.'; renderSheet(); return; }
+  if (c.password === pw) { f.err = 'Password baru sama dengan password sekarang.'; renderSheet(); return; }
+  const auth2 = getUserAdminAuth();
+  mgBusy(true, 'spSave', 'Menyimpan…');
+  auth2.setPersistence(firebase.auth.Auth.Persistence.NONE)
+    .then(function () { return auth2.signInWithEmailAndPassword(c.email || u.email, c.password); })
+    .then(function (cred) { return cred.user.updatePassword(pw); })
+    .then(function () { return db.collection('credentials').doc(u.uid).set(credentialDoc(c.email || u.email, pw)); })
+    .then(function () { credentialsData[u.uid] = { email: c.email || u.email, password: pw }; f.busy = false; mgGo('created', { created: { name: u.name, email: u.email || c.email, password: pw, role: u.role, mode: 'reset' } }); })
+    .catch(function (err) {
+      const code = err && err.code;
+      f.busy = false;
+      f.err = 'Gagal mengatur ulang password: ' + ((code === 'auth/wrong-password' || code === 'auth/invalid-credential' || code === 'auth/invalid-login-credentials')
+        ? 'password tersimpan sudah tidak cocok (mungkin pernah diganti di luar aplikasi). Ganti lewat Firebase Console > Authentication, atau nonaktifkan & buat ulang akunnya.' : authErrorMessage(err));
+      renderSheet();
+    })
+    .finally(function () { auth2.signOut().catch(function () {}); });
+}
+function mgSendReset(uid) {
+  const u = findUserByUid(uid);
+  if (!u || !u.email) return;
+  if (!confirm('Kirim email reset password ke ' + u.email + '?')) return;
+  auth.sendPasswordResetEmail(u.email).then(function () { const f = mgForm(); f.notice = 'Email reset password terkirim ke ' + u.email + '.'; renderSheet(); })
+    .catch(function (e) { alert('Gagal mengirim email reset: ' + authErrorMessage(e)); });
+}
+
+// ---------- Nonaktifkan / aktifkan lagi ----------
+function mgStartDeactivate(uid) {
+  const u = findUserByUid(uid);
+  if (!u || uid === currentUser.uid) return;
+  const aktif = u.role === 'Marketing' ? activeLeadsOf(u.name).length : 0;
+  if (!aktif) {
+    if (!confirm('Nonaktifkan akun ' + u.name + ' (' + (u.email || '-') + ')?\n\nAkun ini langsung tidak bisa login. Data & riwayatnya tetap tersimpan, dan akun bisa diaktifkan lagi kapan saja.')) return;
+    mgDeactivateUser(u, '');
+    return;
+  }
+  mgGo('deactivate', { uid: uid });
+}
+function mgTargets(u) { return activeMarketingUsers().filter(function (x) { return x.uid !== u.uid; }).map(function (x) { return x.name; }); }
+function mgDeactivate(f) {
+  const u = findUserByUid(f.uid);
+  if (!u) return mgUserList(f);
+  const t = mgTargets(u), nm = esc(u.name);
+  return '<h3 style="margin:0 0 6px;font-size:19px">Nonaktifkan ' + nm + '</h3><p class="small muted" style="line-height:1.45">' + nm + ' masih memegang <b style="color:var(--label)">' + activeLeadsOf(u.name).length + ' lead aktif</b>. Pilih ke mana lead tersebut dipindahkan. Lead yang sudah Closed/Lost tetap tercatat atas nama ' + nm + '.</p>' +
+    '<label class="field"><span>Pindahkan lead aktif ke</span><select id="deactTarget">' + t.map(function (n) { return '<option value="' + esc(n) + '">' + esc(n) + '</option>'; }).join('') +
+    (t.length > 1 ? '<option value="__spread__">Bagi rata ke semua marketing aktif lainnya</option>' : '') + '<option value="">Jangan dipindahkan (tetap atas nama ' + nm + ')</option></select></label>' +
+    '<button class="btn btn-danger" style="margin-top:16px" id="deactBtn" onclick="mgDeactivateUser(findUserByUid(sheetState.form.uid), $(\'deactTarget\').value)">Ya, Nonaktifkan</button>';
+}
+function mgDeactivateUser(u, target) {
+  const f = mgForm();
+  if (!u || !f || f.busy) return;
+  const leads = target && u.role === 'Marketing' ? activeLeadsOf(u.name) : [], t = mgTargets(u);
+  const moves = leads.map(function (l, i) { return { id: l.id, to: target === '__spread__' ? t[i % t.length] : target }; }).filter(function (m) { return !!m.to; });
+  mgBusy(true, 'deactBtn', 'Memproses…');
+  commitInChunks(moves, function (b, m) { b.update(db.collection('leads').doc(m.id), { assignedTo: m.to, reassignedFrom: u.name, reassignedAt: FieldValue.serverTimestamp() }); })
+    .then(function () { return db.collection('users').doc(u.uid).update({ active: false, deactivatedAt: FieldValue.serverTimestamp(), deactivatedBy: currentUser.uid, updatedAt: FieldValue.serverTimestamp() }); })
+    .then(function () {
+      (manageAllLeads || []).forEach(function (l) { const m = moves.find(function (x) { return x.id === l.id; }); if (m) l.assignedTo = m.to; });
+      f.busy = false; mgGo('list'); f.notice = 'Akun ' + u.name + ' dinonaktifkan' + (moves.length ? ' dan ' + moves.length + ' lead aktif sudah dipindahkan.' : '.'); renderSheet();
+    })
+    .catch(function (e) { f.busy = false; alert('Gagal menonaktifkan akun: ' + e.message); renderSheet(); });
+}
+function mgReactivate(uid) {
+  const u = findUserByUid(uid), f = mgForm();
+  if (!u || f.busy) return;
+  if (!confirm('Aktifkan lagi akun ' + u.name + ' (' + (u.email || '-') + ')?')) return;
+  f.busy = true;
+  db.collection('users').doc(uid).update({ active: true, reactivatedAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp() })
+    .then(function () { f.notice = 'Akun ' + u.name + ' aktif kembali.'; })
+    .catch(function (e) { alert('Gagal mengaktifkan akun: ' + e.message); })
+    .finally(function () { f.busy = false; renderSheet(); });
+}
+
+// ---------- Hapus permanen (khusus akun nonaktif) ----------
+function mgPurge(f) {
+  const u = findUserByUid(f.uid);
+  if (!u) return mgUserList(f);
+  if (isActiveUser(u)) return '<div class="card empty">Nonaktifkan akun ini dulu sebelum menghapus permanen.</div>';
+  const nm = esc(u.name || '(tanpa nama)'), leads = allLeadsOf(u.name), t = mgTargets(u);
+  const leadField = leads.length ? '<p class="small muted" style="line-height:1.45">Masih ada <b style="color:var(--label)">' + leads.length + ' lead</b> atas nama ' + nm + ' (termasuk yang sudah Closed/Lost). Lead tersebut harus dipindahkan atau dihapus.</p>' +
+    '<label class="field"><span>Lead milik ' + nm + '</span><select id="purgeTarget">' + t.map(function (n) { return '<option value="' + esc(n) + '">Pindahkan ke ' + esc(n) + '</option>'; }).join('') +
+    (t.length > 1 ? '<option value="__spread__">Bagi rata ke semua marketing aktif</option>' : '') + '<option value="__delete__">Hapus juga semua lead-nya (permanen)</option></select></label>' : '';
+  return '<h3 style="margin:0 0 6px;font-size:19px">Hapus Permanen ' + nm + '</h3><p class="small muted">Yang dihapus dan <b style="color:var(--label)">tidak bisa dikembalikan</b>:</p>' +
+    '<ul class="small muted" style="margin:6px 0 10px;padding-left:20px;line-height:1.5"><li>Akun login (ID ' + esc(emailToId(u.email) || '-') + ') dan password tersimpannya</li><li>Profil akun</li><li>Catatan & riwayat aktivitas marketing</li><li>Log pengingat WhatsApp untuk ' + nm + '</li></ul>' +
+    (!credentialsData[u.uid] ? '<div class="card" style="background:var(--red-soft);color:#C02B30;padding:10px 14px;font-size:13.5px">Password akun ini tidak tersimpan, jadi akun login-nya tidak bisa dihapus otomatis. Data lain tetap dihapus; hapus akun login manual di Firebase Console > Authentication.</div>' : '') +
+    leadField + '<label class="field"><span>Ketik HAPUS untuk konfirmasi</span><input id="purgeConfirm" autocomplete="off" placeholder="HAPUS"></label>' +
+    '<button class="btn btn-danger" style="margin-top:16px" id="purgeBtn" onclick="mgPurgeUser()">Hapus Permanen</button>';
+}
+function mgDeleteLoginAccount(u) {
+  const c = credentialsData[u.uid];
+  if (!c || !c.password) return Promise.resolve('no-credential');
+  const auth2 = getUserAdminAuth();
+  return auth2.setPersistence(firebase.auth.Auth.Persistence.NONE)
+    .then(function () { return auth2.signInWithEmailAndPassword(c.email || u.email, c.password); })
+    .then(function (cred) { return cred.user.delete(); })
+    .then(function () { return 'deleted'; })
+    .catch(function (err) {
+      const code = err && err.code;
+      if (code === 'auth/user-not-found') return 'deleted';
+      if (code === 'auth/wrong-password' || code === 'auth/invalid-credential' || code === 'auth/invalid-login-credentials') return 'wrong-password';
+      throw err;
+    })
+    .finally(function () { return auth2.signOut().catch(function () {}); });
+}
+function mgPurgeUser() {
+  const f = mgForm(), u = findUserByUid(f.uid);
+  if (!u || f.busy || isActiveUser(u)) return;
+  if ($('purgeConfirm').value.trim().toUpperCase() !== 'HAPUS') { alert('Ketik HAPUS untuk mengonfirmasi.'); return; }
+  const target = $('purgeTarget') ? $('purgeTarget').value : '', leads = allLeadsOf(u.name), t = mgTargets(u);
+  if (leads.length && !target) { alert('Pilih dulu mau diapakan lead milik ' + u.name + '.'); return; }
+  if (target === '__spread__' && !t.length) { alert('Tidak ada marketing aktif untuk menerima lead.'); return; }
+  let step = '', loginResult = '';
+  mgBusy(true, 'purgeBtn', 'Menghapus…');
+  step = 'memindahkan/menghapus lead';
+  commitInChunks(leads.map(function (l, i) { return { id: l.id, i: i }; }), function (b, it) {
+    const ref = db.collection('leads').doc(it.id);
+    if (target === '__delete__') { b.delete(ref); return; }
+    b.update(ref, { assignedTo: target === '__spread__' ? t[it.i % t.length] : target, reassignedFrom: u.name, reassignedAt: FieldValue.serverTimestamp() });
+  }).then(function () {
+    if (target === '__delete__') leads.forEach(function (l) { waIndexRemove(l.id, l.waNumber); });
+    step = 'menghapus riwayat aktivitas';
+    const actRef = db.collection('marketingActivity').doc(u.uid);
+    return actRef.collection('logs').get().then(function (s) { return commitInChunks(s.docs, function (b, d) { b.delete(d.ref); }); }).then(function () { return actRef.delete(); });
+  }).then(function () {
+    step = 'menghapus log pengingat';
+    if (!u.name) return;
+    return db.collection('reminderLogs').where('marketingName', '==', u.name).get().then(function (s) { return commitInChunks(s.docs, function (b, d) { b.delete(d.ref); }); });
+  }).then(function () {
+    step = 'menghapus akun login';
+    return mgDeleteLoginAccount(u).then(function (r) { loginResult = r; });
+  }).then(function () {
+    step = 'menghapus profil akun';
+    const b = db.batch(); b.delete(db.collection('credentials').doc(u.uid)); b.delete(db.collection('users').doc(u.uid)); return b.commit();
+  }).then(function () {
+    let msg = 'Akun ' + u.name + ' sudah dihapus permanen';
+    if (leads.length) msg += target === '__delete__' ? ' beserta ' + leads.length + ' lead-nya' : ' dan ' + leads.length + ' lead sudah dipindahkan';
+    msg += '.';
+    if (loginResult !== 'deleted') msg += ' Catatan: akun login-nya belum terhapus (' + (loginResult === 'wrong-password' ? 'password tersimpan tidak cocok' : 'password tidak tersimpan') + '). Hapus manual di Firebase Console > Authentication.';
+    f.busy = false; mgGo('list'); f.notice = msg; mgLoadData();
+  }).catch(function (err) {
+    f.busy = false;
+    alert('Gagal ' + step + ': ' + (err && err.message) + '\n\nTekan Hapus Permanen lagi untuk melanjutkan dari langkah yang gagal.');
+    renderSheet();
+  });
+}
+
+// ---------- Impor banyak akun ----------
+function parseBulkRole(raw) {
+  const r = String(raw || '').trim().toLowerCase().replace(/[\s_-]+/g, '');
+  if (r === 'cs' || r === 'customerservice') return 'CS';
+  if (['spv', 'manager', 'spv/manager', 'admin', 'supervisor', 'manajer'].indexOf(r) !== -1) return 'Admin';
+  if (r === 'marketing' || r === 'sales') return 'Marketing';
+  if (r === 'superadmin') return 'SuperAdmin';
+  return null;
+}
+function mgBulk(f) {
+  return '<h3 style="margin:0 0 6px;font-size:19px">Impor Banyak Akun</h3><p class="small muted" style="line-height:1.45">Satu baris untuk satu akun, kolom dipisah tanda <b>|</b>:</p>' +
+    '<div class="card" style="padding:10px 14px;font-family:ui-monospace,monospace;font-size:13px;margin-top:6px">Nama | ID | Role | Password | No WA | Grup</div>' +
+    '<p class="foot">Role: CS, SPV, Manager, Marketing. Password minimal 6 karakter; kosongkan untuk password acak. No WA wajib untuk Marketing; Grup A atau B (kosong = A).</p>' +
+    '<label class="field"><span>Daftar akun</span><textarea id="bulkInput" rows="9" style="font-family:ui-monospace,monospace;font-size:13px" oninput="sheetState.form.bulkDraft=this.value" placeholder="Dewi | dewi | CS | dewi123&#10;Andi | andi | Marketing | andi123 | 081234567890 | A">' + esc(f.bulkDraft || '') + '</textarea></label>' +
+    (f.err ? '<p class="err" style="white-space:pre-line">' + esc(f.err) + '</p>' : '') +
+    '<button class="btn btn-primary" style="margin-top:16px" id="bulkBtn" onclick="mgSubmitBulk()">Periksa & Buat Akun</button>';
+}
+function mgSubmitBulk() {
+  const f = mgForm();
+  if (!f || f.busy) return;
+  f.bulkDraft = $('bulkInput').value;
+  const rows = [], errors = [], seenE = {}, seenN = {};
+  f.bulkDraft.split(/\r?\n/).forEach(function (line, idx) {
+    if (!line.trim()) return;
+    const no = 'Baris ' + (idx + 1) + ': ', c = line.split('|').map(function (x) { return x.trim(); });
+    const name = (c[0] || '').replace(/\s+/g, ' '), rawId = (c[1] || '').toLowerCase(), email = idToEmail(rawId), r = parseBulkRole(c[2]);
+    const pw = c[3] || '', wa = c[4] || '', g = (c[5] || 'A').toUpperCase();
+    if (pw && pw.length < 6) { errors.push(no + 'password minimal 6 karakter (atau kosongkan untuk password acak).'); return; }
+    if (!name) { errors.push(no + 'nama kosong.'); return; }
+    if (!isValidLoginId(rawId)) { errors.push(no + 'ID "' + rawId + '" tidak valid.'); return; }
+    if (!r) { errors.push(no + 'role "' + (c[2] || '') + '" tidak dikenal (pakai CS, SPV, Manager, atau Marketing).'); return; }
+    if (seenE[email]) { errors.push(no + 'ID ' + rawId + ' dobel di daftar.'); return; }
+    if (usersData.some(function (u) { return String(u.email || '').toLowerCase() === email; })) { errors.push(no + 'ID ' + rawId + ' sudah dipakai.'); return; }
+    seenE[email] = true;
+    if (r === 'Marketing') {
+      if (validateWaNumber(wa)) { errors.push(no + 'No WA "' + wa + '" tidak valid.'); return; }
+      if (g !== 'A' && g !== 'B') { errors.push(no + 'grup harus A atau B.'); return; }
+      const k = name.toLowerCase();
+      if (seenN[k] || usersData.some(function (u) { return u.role === 'Marketing' && String(u.name || '').trim().toLowerCase() === k; })) { errors.push(no + 'nama marketing "' + name + '" sudah dipakai (harus unik).'); return; }
+      seenN[k] = true;
+    }
+    rows.push({ name: name, email: email, role: r, password: pw, waNumber: wa, group: g === 'B' ? 'B' : 'A' });
+  });
+  if (!rows.length && !errors.length) errors.push('Daftar masih kosong.');
+  if (errors.length) { f.err = 'Perbaiki dulu:\n' + errors.join('\n'); renderSheet(); return; }
+  const summary = MANAGE_ROLE_ORDER.map(function (r) { const n = rows.filter(function (x) { return x.role === r; }).length; return n ? n + ' ' + ROLE_LABELS[r] : ''; }).filter(Boolean).join(', ');
+  if (!confirm('Buat ' + rows.length + ' akun sekarang? (' + summary + ')')) return;
+  f.err = ''; mgBusy(true, 'bulkBtn');
+  let order = nextRotationOrder();
+  const results = [];
+  rows.reduce(function (prev, row, i) {
+    return prev.then(function () {
+      if ($('bulkBtn')) $('bulkBtn').textContent = 'Membuat akun ' + (i + 1) + ' dari ' + rows.length + '…';
+      const pw = row.password || randomPassword();
+      const profile = { name: row.name, email: row.email, role: row.role, active: true, createdAt: FieldValue.serverTimestamp(), createdBy: currentUser.uid, updatedAt: FieldValue.serverTimestamp() };
+      if (row.role === 'Marketing') Object.assign(profile, { waNumber: row.waNumber, group: row.group, inRotation: true, rotationOrder: order++ });
+      return createLoginAccount(row.email, pw, profile).then(function () { results.push(Object.assign({ ok: true, password: pw }, row)); })
+        .catch(function (e) { results.push(Object.assign({ ok: false, error: authErrorMessage(e) }, row)); });
+    });
+  }, Promise.resolve()).then(function () {
+    f.busy = false; f.bulkResults = results;
+    if (results.every(function (r) { return r.ok; })) f.bulkDraft = '';
+    mgGo('bulkResult'); mgLoadData();
+  });
+}
+function mgBulkResult(f) {
+  const res = f.bulkResults || [], ok = res.filter(function (r) { return r.ok; }), fail = res.filter(function (r) { return !r.ok; });
+  const link = APP.crmUrl ? String(APP.crmUrl).replace(/\/+$/, '') + '/v2/' : '';
+  const text = ok.map(function (r) { return r.name + ' (' + (ROLE_LABELS[r.role] || r.role) + ')\nID: ' + emailToId(r.email) + '\nPassword: ' + r.password; }).join('\n\n') + (ok.length && link ? '\n\nLink: ' + link : '');
+  f.copyText = text;
+  return '<div class="card" style="background:var(--green-soft);color:#1F7A4D"><div style="font-weight:600">' + ok.length + ' akun berhasil dibuat' + (fail.length ? ', ' + fail.length + ' gagal' : '') + '.</div><div class="small" style="margin-top:4px">Salin data login di bawah dan bagikan ke masing-masing orang.</div></div>' +
+    (fail.length ? '<div class="card" style="background:var(--red-soft);color:#C02B30;margin-top:10px;font-size:14px">' + fail.map(function (r) { return '<div><b>' + esc(r.name) + '</b> (' + esc(r.email) + '): ' + esc(r.error) + '</div>'; }).join('') + '</div>' : '') +
+    (ok.length ? '<pre class="card" style="white-space:pre-wrap;word-break:break-word;font-size:14px;margin-top:12px;font-family:inherit;max-height:320px;overflow:auto">' + esc(text) + '</pre>' : '') +
+    '<div class="grid2" style="margin-top:12px">' + (ok.length ? '<button class="btn btn-tinted" onclick="copyText(sheetState.form.copyText,this)">Salin Semua</button>' : '<span></span>') + '<button class="btn btn-primary" onclick="mgGo(\'list\')">Daftar Akun</button></div>';
+}
+
+// ---------- Daftar proyek ----------
+function mgProjects(f) {
+  return mgNotice(f) + '<p class="foot" style="margin-top:0">Daftar ini muncul di pilihan Proyek pada form input lead. Menghapus proyek tidak mengubah lead lama.</p>' +
+    (projectList.length ? '<div class="group">' + projectList.map(function (p, i) {
+      return '<div class="row"><div class="main"><div class="t wrap">' + esc(p) + '</div></div>' + (i > 0 ? mgBtn('↑', 'mgMoveProject(' + i + ',-1)') : '') + (i < projectList.length - 1 ? mgBtn('↓', 'mgMoveProject(' + i + ',1)') : '') + mgBtn('Hapus', 'mgRemoveProject(' + i + ')', 'danger') + '</div>';
+    }).join('') + '</div>' : '<div class="card empty">Belum ada proyek.</div>') +
+    '<div class="hstack" style="gap:8px;margin-top:12px"><label class="field" style="flex:1;margin:0"><span>Proyek baru</span><input id="newProject" maxlength="60" placeholder="Nama proyek"></label><button class="btn btn-primary" style="width:auto;padding:0 18px;height:52px" onclick="mgAddProject()">Tambah</button></div>';
+}
+function mgSaveProjects(list, notice) {
+  const f = mgForm();
+  if (!f || f.busy) return;
+  f.busy = true;
+  db.collection('settings').doc('projects').set({ list: list, updatedAt: FieldValue.serverTimestamp(), updatedBy: currentUser.uid })
+    .then(function () { projectList = list.slice(); f.notice = notice; })
+    .catch(function (e) { alert('Gagal menyimpan daftar proyek: ' + e.message); })
+    .finally(function () { f.busy = false; renderSheet(); });
+}
+function mgAddProject() {
+  const name = $('newProject').value.trim().replace(/\s+/g, ' ');
+  if (!name) return;
+  if (projectList.some(function (p) { return p.toLowerCase() === name.toLowerCase(); })) { alert('Proyek "' + name + '" sudah ada di daftar.'); return; }
+  mgSaveProjects(projectList.concat([name]), 'Proyek "' + name + '" ditambahkan.');
+}
+function mgMoveProject(i, d) {
+  const j = i + d; if (j < 0 || j >= projectList.length) return;
+  const l = projectList.slice(), x = l[i]; l[i] = l[j]; l[j] = x;
+  mgSaveProjects(l, 'Urutan proyek diperbarui.');
+}
+function mgRemoveProject(i) {
+  const name = projectList[i]; if (name == null) return;
+  if (!confirm('Hapus proyek "' + name + '" dari daftar pilihan?\n\nLead lama yang memakai proyek ini tidak berubah.')) return;
+  mgSaveProjects(projectList.filter(function (_, k) { return k !== i; }), 'Proyek "' + name + '" dihapus dari daftar.');
+}
+
+// ---------- Reset Data (server: api/reset-data.js) ----------
+const RESET_ITEMS = [
+  { key: 'leads', label: 'Data buyer / lead', required: true, hint: 'Semua lead dari input CS dan input mandiri marketing, beserta riwayat follow-up dan janji kunjungannya.' },
+  { key: 'spam', label: 'Nomor spam', hint: 'Input Spam dari CS (tampil di Riwayat Input).' },
+  { key: 'reminderLogs', label: 'Log pengingat WA', hint: 'Catatan siapa yang mengingatkan marketing lewat WA.' },
+  { key: 'activity', label: 'Aktivitas marketing', hint: 'Catatan login dan update data tiap marketing.' },
+  { key: 'kpi', label: 'Laporan & tren KPI', hint: 'Laporan Live/Canvasing semua marketing dan rekap grafik tren. Target & bobot KPI tidak ikut terhapus.' },
+  { key: 'broadcasts', label: 'Riwayat Kirim Notif', hint: 'Daftar notif/pengumuman yang pernah dikirim, termasuk riwayat di tombol lonceng.' },
+  { key: 'rotation', label: 'Antrean giliran rotasi', noCount: true, hint: 'Giliran lead dimulai lagi dari marketing urutan pertama.' }
+];
+function apiPost(path, payload) {
+  return Promise.resolve().then(function () {
+    if (!auth.currentUser) throw new Error('Sesi login habis. Silakan keluar lalu masuk lagi.');
+    return auth.currentUser.getIdToken();
+  }).then(function (t) {
+    return fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + t }, body: JSON.stringify(payload) });
+  }).then(function (r) {
+    return r.text().then(function (txt) {
+      let d = {}; try { d = JSON.parse(txt); } catch (e) {}
+      if (!r.ok) throw new Error(d.error || (r.status === 404 ? 'Server (' + path + ') belum ter-deploy di Vercel.' : 'Server merespons ' + r.status));
+      return d;
+    });
+  });
+}
+function mgLoadResetCounts() {
+  const f = mgForm(); if (!f) return;
+  f.reset = Object.assign(f.reset || { checked: {} }, { loading: true, error: '', counts: null });
+  apiPost('/api/reset-data', { action: 'count' }).then(function (d) { f.reset.counts = d.counts || {}; })
+    .catch(function (e) { f.reset.error = e.message; })
+    .finally(function () { f.reset.loading = false; if (mgForm() === f && !f.busy) renderSheet(); });
+}
+function mgReset(f) {
+  if (!f.reset) { f.reset = { checked: {} }; mgLoadResetCounts(); }
+  const st = f.reset, c = st.counts;
+  return mgNotice(f) + '<div class="card" style="background:var(--red-soft);color:#C02B30;font-size:14.5px"><b>Hapus permanen, tidak bisa dibatalkan.</b> Pakai untuk membersihkan data uji coba sebelum mulai memasukkan data asli.</div>' +
+    '<p class="foot">Yang tidak dihapus: semua akun, daftar proyek, dan pengaturan.</p>' + (st.error ? '<p class="err">Gagal menghitung data: ' + esc(st.error) + '</p>' : '') +
+    '<div class="group" style="margin-top:10px">' + RESET_ITEMS.map(function (it) {
+      const n = it.noCount ? '' : c ? ' <span class="muted tiny">(' + (c[it.key] || 0) + ' data)</span>' : st.loading ? ' <span class="muted tiny">(menghitung…)</span>' : '';
+      const on = it.required || st.checked[it.key];
+      return '<button class="row" style="align-items:flex-start"' + (it.required ? '' : ' onclick="sheetState.form.reset.checked[\'' + it.key + '\']=!sheetState.form.reset.checked[\'' + it.key + '\'];renderSheet()"') + '>' +
+        (on ? ICON.check : '<span style="width:20px;height:20px;border:1.5px solid var(--label3,#c7c7cc);border-radius:50%;flex:none"></span>') +
+        '<div class="main"><div class="t">' + esc(it.label) + n + (it.required ? ' <span class="pill p-red">wajib</span>' : '') + '</div><div class="s wrap">' + esc(it.hint) + '</div></div></button>';
+    }).join('') + '</div>' +
+    '<label class="field" style="margin-top:12px"><span>Ketik RESET untuk konfirmasi</span><input id="resetConfirm" autocomplete="off" placeholder="RESET"></label>' +
+    '<p class="small" id="resetProgress" style="margin-top:8px"></p>' +
+    '<div class="grid2" style="margin-top:8px"><button class="btn btn-tinted" onclick="mgLoadResetCounts()">Hitung Ulang</button><button class="btn btn-danger" id="resetBtn" onclick="mgRunReset()">Hapus Sekarang</button></div>';
+}
+function mgRunReset() {
+  const f = mgForm(); if (!f || f.busy) return;
+  const prog = $('resetProgress');
+  if ($('resetConfirm').value.trim() !== 'RESET') { prog.style.color = 'var(--red)'; prog.textContent = 'Ketik RESET (huruf besar semua) untuk konfirmasi.'; return; }
+  const chosen = RESET_ITEMS.filter(function (it) { return it.required || f.reset.checked[it.key]; }), items = chosen.map(function (it) { return it.key; });
+  if (!confirm('Yakin hapus permanen: ' + chosen.map(function (it) { return it.label; }).join(', ') + '?\n\nData yang sudah dihapus tidak bisa dikembalikan. Akun dan daftar proyek tetap ada.')) return;
+  mgBusy(true, 'resetBtn', 'Menghapus…');
+  prog.style.color = 'var(--label2)'; prog.textContent = 'Menghapus data…';
+  const total = {}, sum = function () { return Object.keys(total).reduce(function (s, k) { return s + total[k]; }, 0); };
+  function step(round) {
+    return apiPost('/api/reset-data', { action: 'reset', confirm: 'RESET', items: items }).then(function (d) {
+      Object.keys(d.deleted || {}).forEach(function (k) { total[k] = (total[k] || 0) + d.deleted[k]; });
+      prog.textContent = 'Menghapus data… ' + sum() + ' data terhapus';
+      if (d.more && round < 200) return step(round + 1);
+      if (d.more) throw new Error('Data masih tersisa. Tekan Hapus Sekarang sekali lagi untuk melanjutkan.');
+    });
+  }
+  step(1).then(function () {
+    const parts = chosen.filter(function (it) { return !it.noCount; }).map(function (it) { return it.label + ' ' + (total[it.key] || 0); });
+    if (items.indexOf('rotation') !== -1) parts.push('antrean rotasi dimulai ulang');
+    f.busy = false; f.notice = 'Reset selesai: ' + parts.join(', ') + '. Akun dan daftar proyek tetap ada.'; f.reset = null; manageAllLeads = null; renderSheet();
+  }).catch(function (e) {
+    f.busy = false; if ($('resetBtn')) { $('resetBtn').disabled = false; $('resetBtn').textContent = 'Hapus Sekarang'; }
+    prog.style.color = 'var(--red)'; prog.textContent = 'Gagal: ' + e.message + (sum() ? ' (' + sum() + ' data sudah terhapus)' : '');
+  });
+}
+
+// ---------- Atur Target KPI ----------
+SHEETS.kpiSettings = function () {
+  if (!isSuperAdminUser()) return sheetHead('Atur Target KPI') + '<div class="card empty">Khusus Super Admin.</div>';
+  const items = kpiItems(), total = items.reduce(function (s, it) { return s + it.weight; }, 0);
+  return sheetHead('Atur Target KPI', '<button class="btn-plain" style="font-weight:600" id="ksSave" onclick="saveKpiSettingsV2()">Simpan</button>', 'Batal') +
+    '<p class="foot" style="margin-top:0">Target berlaku per bulan untuk setiap marketing. Total bobot harus 100%.</p>' +
+    '<div class="group">' + items.map(function (it) {
+      return '<div class="row" style="gap:10px"><div class="main"><div class="t wrap">' + esc(it.label) + '</div></div>' +
+        '<label style="width:84px"><span class="muted tiny">Target</span><input id="ksT_' + it.key + '" type="number" min="1" step="1" value="' + it.target + '" style="width:100%;font-size:16px;border:0;background:var(--fill);border-radius:8px;padding:6px 8px"></label>' +
+        '<label style="width:70px"><span class="muted tiny">Bobot %</span><input id="ksW_' + it.key + '" type="number" min="0" max="100" step="1" value="' + it.weight + '" oninput="ksTotal()" style="width:100%;font-size:16px;border:0;background:var(--fill);border-radius:8px;padding:6px 8px"></label></div>';
+    }).join('') + '</div>' +
+    '<p class="small" style="margin-top:12px">Total bobot: <b id="ksTotal">' + fmt(total) + '%</b></p><p class="err hidden" id="ksErr"></p>' +
+    '<p class="foot">Perubahan langsung dipakai untuk menghitung skor semua bulan yang dibuka ulang. Sebaiknya diubah di awal bulan.</p>';
+};
+function ksTotal() {
+  const t = KPI_DEFAULTS.reduce(function (s, d) { return s + (Number($('ksW_' + d.key).value) || 0); }, 0);
+  $('ksTotal').textContent = fmt(t) + '%'; $('ksTotal').style.color = Math.abs(t - 100) < 0.001 ? '' : 'var(--red)';
+}
+function saveKpiSettingsV2() {
+  if (!isSuperAdminUser()) return;
+  const err = function (m) { $('ksErr').textContent = m; $('ksErr').classList.remove('hidden'); };
+  const out = {}; let total = 0;
+  for (let i = 0; i < KPI_DEFAULTS.length; i++) {
+    const d = KPI_DEFAULTS[i], t = Number($('ksT_' + d.key).value), w = Number($('ksW_' + d.key).value);
+    if (!(t > 0) || !Number.isFinite(w) || w < 0) return err('Target ' + d.label + ' harus lebih dari 0 dan bobotnya tidak boleh kosong.');
+    out[d.key] = { target: t, weight: w }; total += w;
+  }
+  if (Math.abs(total - 100) > 0.001) return err('Total bobot sekarang ' + fmt(total) + '%. Sesuaikan supaya pas 100%.');
+  const btn = $('ksSave'); btn.disabled = true; btn.textContent = 'Menyimpan…';
+  db.collection('settings').doc('kpi').set({ items: out, updatedAt: FieldValue.serverTimestamp(), updatedBy: currentUser.name || '' }).then(function () {
+    kpiConfig = { items: out }; closeSheet(); toast('Target KPI tersimpan'); afterKpiChange();
+  }).catch(function (e) { err('Gagal menyimpan: ' + e.message); btn.disabled = false; btn.textContent = 'Simpan'; });
+}
+
+// ---------- Tes Push ----------
+SHEETS.testPush = function () {
+  if (!isSuperAdminUser()) return sheetHead('Tes Push') + '<div class="card empty">Khusus Super Admin.</div>';
+  const f = sheetState.form;
+  if (!f.init) {
+    f.init = true; f.counts = null; f.target = currentUser.uid;
+    db.collection('pushTokens').get().then(function (s) { const m = {}; s.docs.forEach(function (d) { m[d.id] = (d.data().tokens || []).length; }); f.counts = m; })
+      .catch(function (e) { console.warn(e); f.counts = {}; }).finally(function () { if (sheetState && sheetState.form === f) { tpCapture(); renderSheet(); } });
+  }
+  const known = f.counts && Object.keys(f.counts).length > 0;
+  const lab = function (u) { const n = (f.counts || {})[u.uid] || 0; return u.name + ' (' + (ROLE_LABELS[u.role] || u.role) + ')' + (known ? (n ? ' · ' + n + ' perangkat aktif' : ' · belum aktif') : ''); };
+  const others = usersData.filter(function (u) { return isActiveUser(u) && u.uid !== currentUser.uid; }).sort(function (a, b) { return String(a.name).localeCompare(String(b.name)); });
+  const opt = function (v, t) { return '<option value="' + esc(v) + '"' + (f.target === v ? ' selected' : '') + '>' + esc(t) + '</option>'; };
+  return sheetHead('Tes Push') + '<p class="foot" style="margin-top:0">Kirim push notification percobaan untuk memastikan notifikasi sampai ke HP.</p>' +
+    '<label class="field"><span>Kirim ke</span><select id="tpTarget" onchange="sheetState.form.target=this.value">' + opt(currentUser.uid, 'Saya sendiri') + opt('__all__', 'Semua yang sudah aktif') + others.map(function (u) { return opt(u.uid, lab(u)); }).join('') + '</select></label>' +
+    '<label class="field"><span>Judul</span><input id="tpTitle" value="' + esc(f.title || 'Tes Notifikasi') + '"></label>' +
+    '<label class="field"><span>Isi</span><input id="tpBody" value="' + esc(f.body || 'Push notification berhasil diterima.') + '"></label>' +
+    (f.result ? '<p class="small" style="margin-top:10px;color:' + (f.result.ok ? '#1F7A4D' : 'var(--red)') + '">' + esc(f.result.text) + '</p>' : '') +
+    '<button class="btn btn-primary" style="margin-top:16px" id="tpSend" onclick="tpSend()">Kirim Notifikasi</button>';
+};
+function tpCapture() { const f = sheetState.form; if ($('tpTitle')) f.title = $('tpTitle').value; if ($('tpBody')) f.body = $('tpBody').value; }
+function tpSend() {
+  const f = sheetState.form; tpCapture();
+  const btn = $('tpSend'); btn.disabled = true; btn.textContent = 'Mengirim…';
+  apiPost('/api/send-push', { targetUid: f.target, title: String(f.title || '').trim() || 'Tes Notifikasi', body: String(f.body || '').trim() || 'Push notification berhasil diterima.' })
+    .then(function (d) { f.result = { ok: !!d.sent, text: 'Terkirim ke ' + d.sent + ' dari ' + d.devices + ' perangkat' + (d.failed ? ' (' + d.failed + ' gagal' + (d.removed ? ', ' + d.removed + ' token kedaluwarsa dibersihkan' : '') + ')' : '') + '.' }; })
+    .catch(function (e) { f.result = { ok: false, text: 'Gagal: ' + e.message }; })
+    .finally(function () { if (sheetState && sheetState.form === f) renderSheet(); });
+}
 
 // =====================================================================
 // Riwayat Input (CS, SPV/Manager, Super Admin): lead dari CS (umum & iklan) + nomor spam.
