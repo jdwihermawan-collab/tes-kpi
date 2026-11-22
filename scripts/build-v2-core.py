@@ -59,6 +59,8 @@ FUNCS = [
     'kpiSnapDocId', 'kpiDayAfter', 'kpiSnapTargetAsOf', 'kpiSortReports', 'kpiBuildRow', 'kpiMakeSnap',
     'kpiSaveSnaps', 'kpiQueryReports', 'kpiFetchLeadsByIds', 'kpiLoadFull', 'kpiLoadFromSnaps',
     'kpiFetchRowReports', 'kpiEnsureAllReports', 'kpiBuildPdf', 'exportKpiExcelNow',
+    # export PDF daftar lead
+    'slugifyFilename', 'buildLeadsPdfDoc',
 ]
 
 

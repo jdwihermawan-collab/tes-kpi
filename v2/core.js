@@ -1298,3 +1298,105 @@
       });
     }
 
+    function slugifyFilename(text) {
+      return String(text || 'lead').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-+|-+$)/g, '') || 'lead';
+    }
+
+    function buildLeadsPdfDoc(list, subtitleLines) {
+      if (!window.jspdf || !window.jspdf.jsPDF) {
+        alert('Pustaka PDF belum termuat, pastikan koneksi internet aktif lalu coba lagi.');
+        return null;
+      }
+      const jsPDF = window.jspdf.jsPDF;
+      const doc = new jsPDF({ orientation: 'landscape', unit: 'pt', format: 'a4' });
+      const pageWidth = doc.internal.pageSize.getWidth();
+      const pageHeight = doc.internal.pageSize.getHeight();
+      const marginX = 36;
+
+      // --- Kop laporan: pita hijau tua khas aplikasi + nama perusahaan ---
+      doc.setFillColor.apply(doc, PDF_BRAND_GREEN);
+      doc.rect(0, 0, pageWidth, 86, 'F');
+
+      doc.setTextColor(255, 255, 255);
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(17);
+      doc.text(String(APP.companyName || '').toUpperCase(), marginX, 34);
+
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(11);
+      doc.text('Laporan Data Lead \u2013 ' + APP.appName, marginX, 52);
+
+      doc.setFontSize(9);
+      doc.setTextColor.apply(doc, PDF_BRAND_ON_DARK);
+      doc.text(subtitleLines.join('   |   '), marginX, 68);
+
+      doc.setFontSize(9);
+      doc.setTextColor(255, 255, 255);
+      doc.text('Dicetak: ' + formatDateID(new Date()), pageWidth - marginX, 34, { align: 'right' });
+      doc.text('Total Lead: ' + list.length, pageWidth - marginX, 50, { align: 'right' });
+
+      // --- Tabel data ---
+      const head = [['Tanggal Masuk', 'Nama Buyer', 'No. WhatsApp', 'Sumber Iklan', 'Proyek', 'Marketing', 'Status', 'Hot Prospek']];
+      const body = list.map(function (l) {
+        return [
+          formatDateID(toJsDate(l.createdAt)),
+          l.buyerName || '-',
+          l.waNumber || '-',
+          l.adSource || '-',
+          l.project || '-',
+          l.assignedTo || '-',
+          l.status || '-',
+          l.isHot ? 'Ya' : 'Tidak'
+        ];
+      });
+
+      doc.autoTable({
+        head: head,
+        body: body,
+        startY: 106,
+        margin: { left: marginX, right: marginX, bottom: 40 },
+        styles: {
+          font: 'helvetica',
+          fontSize: 9,
+          cellPadding: 7,
+          textColor: PDF_TEXT_DARK,
+          lineColor: [228, 232, 227],
+          lineWidth: 0.5,
+          valign: 'middle'
+        },
+        headStyles: {
+          fillColor: PDF_BRAND_GREEN,
+          textColor: [255, 255, 255],
+          fontStyle: 'bold',
+          fontSize: 9.5,
+          halign: 'left'
+        },
+        alternateRowStyles: { fillColor: PDF_BRAND_GREEN_SOFT },
+        columnStyles: {
+          0: { cellWidth: 68 },
+          2: { cellWidth: 78 },
+          6: { cellWidth: 78 },
+          7: { cellWidth: 62, halign: 'center' }
+        },
+        didParseCell: function (data) {
+          if (data.section === 'body' && data.column.index === 7 && data.cell.raw === 'Ya') {
+            data.cell.styles.textColor = PDF_HOT_ACCENT;
+            data.cell.styles.fontStyle = 'bold';
+          }
+        }
+      });
+
+      // --- Footer: nama perusahaan kecil + nomor halaman, di setiap halaman ---
+      const totalPages = doc.internal.getNumberOfPages();
+      for (let i = 1; i <= totalPages; i++) {
+        doc.setPage(i);
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(8);
+        doc.setTextColor.apply(doc, PDF_TEXT_MUTED);
+        doc.text(APP.companyName + ' \u2013 ' + APP.appName, marginX, pageHeight - 18);
+        doc.text('Halaman ' + i + ' dari ' + totalPages, pageWidth - marginX, pageHeight - 18, { align: 'right' });
+      }
+
+      return doc;
+    }
+

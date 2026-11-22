@@ -47,6 +47,9 @@ Tanpa index, aplikasi tetap jalan (otomatis memakai query lama / lengkap), hanya
 - `v2/core.js`: DIBUAT OTOMATIS dari `index.html` (APP_CONFIG + fungsi logika: KPI, terima lead, cek nomor
   ganda, rekap hemat-read, lonceng). Setelah mengubah logika di `index.html`, jalankan:
   `python3 scripts/build-v2-core.py`
-- Fitur yang masih di tampilan lama (dibuka lewat menu Lainnya): panel CS, Kelola Akun & Proyek,
-  Kirim Notif, Kirim Pengingat WA, Riwayat Input, Atur Target KPI, Reset Data, Tes Push.
+- Semua fitur tampilan lama sudah ada di V2: Panel CS (input umum/iklan/spam, rotasi), Riwayat Input,
+  Kirim Notif, Kirim Pengingat WA + Log Pengingat, Aktivitas per marketing, Kelola Akun & Proyek
+  (impor akun, password, nonaktif/hapus permanen), Reset Data, Atur Target KPI, Tes Push,
+  filter lanjutan + Export PDF/CSV daftar lead, mode Pilih (hapus banyak lead).
+- Tampilan lama (`/`) tetap ada dan tidak diubah.
 - `prototype/`: contoh desain statis (data dummy), tidak terhubung Firebase.

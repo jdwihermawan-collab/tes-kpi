@@ -294,7 +294,7 @@ function sheetHead(title, rightHtml, leftLabel) {
   return '<div class="sheet-head"><div class="side"><button class="btn-plain" onclick="closeSheet()">' + (leftLabel || 'Tutup') + '</button></div><h3>' + title + '</h3><div class="side r">' + (rightHtml || '') + '</div></div>';
 }
 // Sheet yang berisi formulir tidak di-render ulang otomatis saat data berubah (isian tidak hilang).
-function sheetIsForm() { return sheetState && ['update', 'newLead', 'report', 'pdf', 'broadcast', 'waRemind', 'manage', 'kpiSettings', 'testPush'].indexOf(sheetState.kind) !== -1; }
+function sheetIsForm() { return sheetState && ['update', 'newLead', 'report', 'pdf', 'broadcast', 'waRemind', 'manage', 'kpiSettings', 'testPush', 'leadFilter'].indexOf(sheetState.kind) !== -1; }
 
 // =====================================================================
 // Login & sesi
@@ -401,7 +401,8 @@ function stopAll() {
   Object.keys(trendCache).forEach(function (k) { delete trendCache[k]; });
   kpiReportsCache = {};
   resetNotifState('marketing'); resetNotifState('csAdmin');
-  csSuccess = null; csForm = {};
+  csSuccess = null; csForm = {}; selMode = false; selIds.clear();
+  leadFilter = { status: '', project: '', dateType: 'createdAt', from: '', to: '' };
   closeSheet();
 }
 
@@ -606,6 +607,11 @@ function dueLabel(l) {
 function leadRow(l, opts) {
   opts = opts || {};
   const sub = (isTeamRole() && !opts.noOwner ? (l.assignedTo || '-') + ' · ' : '') + (l.project || '-') + ' · ' + (l.status || '-');
+  if (selMode && tab === 'leads' && !opts.noSel) {
+    const ok = canDeleteLead(l), on = selIds.has(l.id);
+    return '<button class="row ind"' + (ok ? ' onclick="toggleSel(\'' + esc(l.id) + '\')"' : ' style="opacity:.45"') + '><div class="avatar" style="background:' + (on ? 'var(--tint)' : 'var(--fill2)') + '">' + (on ? ICON.check.replace('class="check"', 'class="check" style="color:#fff"') : '') + '</div>' +
+      '<div class="main"><div class="t">' + esc(l.buyerName || '-') + '</div><div class="s">' + esc(sub) + '</div></div></button>';
+  }
   return '<button class="row ind" onclick="openSheet(\'lead\',\'' + esc(l.id) + '\')"><div class="avatar" style="background:' + colorFor(l.id) + '">' + esc(initials(l.buyerName)) + '</div>' +
     '<div class="main"><div class="t">' + esc(l.buyerName || '-') + (l.isHot ? ' <span class="pill p-red" style="margin-left:4px;padding:1px 7px">Hot</span>' : '') + '</div><div class="s">' + esc(sub) + '</div></div>' +
     (opts.noDue ? '' : dueLabel(l)) + chev + '</button>';
@@ -644,6 +650,7 @@ function tabsFor() {
 }
 function go(t) {
   tab = t;
+  if (t !== 'leads') { selMode = false; selIds.clear(); }
   if (t === 'kpi' && role === 'marketing' && !myKpi) loadMyKpi(false);
   if (t === 'kpi' && role === 'staff' && !kpiData) loadTeamKpi(false);
   rerender(); window.scrollTo({ top: 0 });
@@ -762,7 +769,7 @@ function homeMk() {
       '<button class="row" onclick="openSheet(\'report\')"><div class="main"><div class="t">Lapor Live TikTok / Canvasing</div><div class="s">Dihitung untuk KPI Online/Offline</div></div>' + chev + '</button>' +
       '<button class="row" onclick="openSheet(\'newLead\')"><div class="main"><div class="t">Tambah lead baru</div><div class="s">Input mandiri · masuk Database Baru</div></div>' + chev + '</button>' +
     '</div>' +
-    (stale.length ? '<p class="foot" style="margin-top:14px">' + stale.length + ' lead tidak di-update lebih dari 45 hari. Kalau sudah tidak berminat, ubah ke Lost (Batal) supaya daftar lebih ringkas.</p>' : '');
+    (stale.length ? '<p class="foot" style="margin-top:14px">' + stale.length + ' lead tidak di-update lebih dari 45 hari. Kalau sudah tidak berminat, ubah ke Lost (Batal) supaya daftar lebih ringkas. <button class="btn-plain tiny" onclick="showStaleLeadsV2()">Tampilkan</button></p>' : '');
 }
 
 // ---------- Lead (marketing & staff) ----------
@@ -774,6 +781,12 @@ function leadsScreen() {
     (role === 'marketing' ? '<button class="icon-btn" style="background:var(--tint);color:#fff" onclick="openSheet(\'newLead\')" aria-label="Tambah lead">' + ICON.plus + '</button>' : '') + '</div>' +
     mkOpts +
     '<div class="seg">' + segs.map(function (s) { return '<button class="' + (leadSeg === s[0] ? 'on' : '') + '" onclick="leadSeg=\'' + s[0] + '\';rerender()">' + s[1] + '</button>'; }).join('') + '</div>' +
+    (selMode
+      ? '<div class="hstack" style="margin-top:10px;gap:10px"><span class="small" style="flex:1;font-weight:600">' + selIds.size + ' dipilih</span><button class="btn btn-tinted" style="width:auto;height:34px;padding:0 14px;font-size:14px" onclick="toggleSelMode(false)">Batal</button><button class="btn btn-danger" style="width:auto;height:34px;padding:0 14px;font-size:14px"' + (selIds.size ? '' : ' disabled') + ' onclick="bulkDeleteLeads()">Hapus</button></div>' +
+        (role === 'marketing' ? '<p class="foot" style="margin-top:6px">Hanya lead input mandiri yang bisa dihapus.</p>' : '')
+      : '<div class="hstack" style="margin-top:10px;gap:18px;justify-content:flex-end">' +
+        (isTeamRole() && leadMk ? '<button class="btn-plain small" style="margin-right:auto" onclick="openSheet(\'actLog\',\'' + esc(leadMk).replace(/'/g, "\\'") + '\')">Aktivitas ' + esc(leadMk.split(' ')[0]) + '</button>' : '') +
+        '<button class="btn-plain small" onclick="openSheet(\'leadFilter\')">Filter' + (leadFilterCount() ? ' (' + leadFilterCount() + ')' : '') + '</button><button class="btn-plain small" onclick="openSheet(\'leadExport\')">Export</button><button class="btn-plain small" onclick="toggleSelMode(true)">Pilih</button></div>') +
     leadListHtml();
 }
 function filteredLeads() {
@@ -787,6 +800,7 @@ function filteredLeads() {
     if (leadSeg === 'done' && !isClosed(l)) return false;
     if (leadSeg === 'all' && isClosed(l)) return false;
     if (q && String(l.buyerName || '').toLowerCase().indexOf(q) === -1 && !(qd.length >= 3 && toWaDigits(l.waNumber).indexOf(qd.replace(/^0/, '')) !== -1)) return false;
+    if (!leadPassesFilter(l)) return false;
     return true;
   }).sort(function (a, b) {
     if (leadSeg === 'done') return toJsDate(b.lastUpdated || b.createdAt) - toJsDate(a.lastUpdated || a.createdAt);
@@ -1159,6 +1173,7 @@ function moreScreen() {
   const staffLinks = role === 'staff' ? '<div class="section-h"><h2>Fitur lanjutan</h2></div><div class="group">' +
     '<button class="row" onclick="openSheet(\'broadcast\')"><div class="main"><div class="t">Kirim Notif</div><div class="s">Peringatan / pengumuman ke HP marketing</div></div>' + chev + '</button>' +
     '<button class="row" onclick="openSheet(\'waRemind\')"><div class="main"><div class="t">Kirim Pengingat WA</div><div class="s">Rekap lead jatuh tempo per marketing</div></div>' + chev + '</button>' +
+    '<button class="row" onclick="openSheet(\'reminderLog\')"><div class="main"><div class="t">Log Pengingat</div><div class="s">Siapa saja yang sudah mengingatkan marketing</div></div>' + chev + '</button>' +
     '<button class="row" onclick="openSheet(\'riwayat\')"><div class="main"><div class="t">Riwayat Input</div><div class="s">Lead umum, iklan & spam dari CS</div></div>' + chev + '</button>' +
     (currentUser.role === 'SuperAdmin' ? sheetRow('manage', 'Kelola Akun & Proyek', 'Tambah / ubah akun, daftar proyek, reset data') + sheetRow('kpiSettings', 'Atur Target KPI', 'Target & bobot 7 indikator') + sheetRow('testPush', 'Tes Push', 'Uji notifikasi ke HP') : '') +
     '</div>' : '';
@@ -1166,7 +1181,8 @@ function moreScreen() {
     '<div class="section-h"><h2>Pengaturan</h2></div><div class="group">' +
       '<div class="row"><div class="main"><div class="t">Notifikasi push</div><div class="s">' + (pushOn ? 'Aktif di perangkat ini' : esc(pushUnsupportedReason() || 'Belum aktif')) + '</div></div>' + (pushOn ? '<span class="pill p-green">Aktif</span>' : (pushUnsupportedReason() ? '' : '<button class="btn-plain" onclick="enablePush()">Aktifkan</button>')) + '</div>' +
       '<button class="row" onclick="openSheet(\'notif\')"><div class="main"><div class="t">Riwayat notifikasi</div></div>' + chev + '</button>' +
-    '</div>' + staffLinks +
+    '</div>' + staffLinks + (role === 'cs' ? '<div class="section-h"><h2>Fitur lanjutan</h2></div><div class="group">' +
+      sheetRow('waRemind', 'Kirim Pengingat WA', 'Rekap lead jatuh tempo per marketing') + sheetRow('reminderLog', 'Log Pengingat', 'Siapa saja yang sudah mengingatkan marketing') + sheetRow('riwayat', 'Riwayat Input', 'Lead umum, iklan & spam') + '</div>' : '') +
     '<div class="section-h"><h2>Tampilan</h2></div><div class="group"><a class="row" href="/"><div class="main"><div class="t">Buka tampilan lama</div><div class="s">Data & login sama</div></div>' + chev + '</a></div>' +
     '<div class="group" style="margin-top:22px"><button class="row" onclick="logout()" style="justify-content:center"><span style="color:var(--red);font-weight:500">Keluar</span></button></div>';
 }
@@ -1175,6 +1191,178 @@ function moreScreen() {
 // Sheets
 // =====================================================================
 const SHEETS = {};
+
+// ---------- Filter lanjutan & Export (daftar lead) ----------
+let leadFilter = { status: '', project: '', dateType: 'createdAt', from: '', to: '' };
+function leadFilterCount() { return ['status', 'project'].filter(function (k) { return leadFilter[k]; }).length + (leadFilter.from || leadFilter.to ? 1 : 0); }
+function leadPassesFilter(l) {
+  const f = leadFilter;
+  if (f.status && l.status !== f.status) return false;
+  if (f.project && l.project !== f.project) return false;
+  if (f.from || f.to) {
+    const d = toJsDate(f.dateType === 'lastUpdated' ? (l.lastUpdated || l.createdAt) : l.createdAt);
+    if (f.from && d < new Date(f.from + 'T00:00:00')) return false;
+    if (f.to && d > new Date(f.to + 'T23:59:59')) return false;
+  }
+  return true;
+}
+SHEETS.leadFilter = function () {
+  const f = leadFilter, opt = function (list, sel, all) { return '<option value="">' + all + '</option>' + list.map(function (x) { return '<option value="' + esc(x) + '"' + (x === sel ? ' selected' : '') + '>' + esc(x) + '</option>'; }).join(''); };
+  return sheetHead('Filter', '<button class="btn-plain" style="font-weight:600" onclick="applyLeadFilter()">Terapkan</button>', 'Batal') +
+    '<label class="field"><span>Status</span><select id="lfStatus">' + opt(['New'].concat(STATUS_CHOICES), f.status, 'Semua status') + '</select></label>' +
+    '<label class="field"><span>Proyek</span><select id="lfProject">' + opt(projectList, f.project, 'Semua proyek') + '</select></label>' +
+    '<label class="field"><span>Tanggal berdasarkan</span><select id="lfType"><option value="createdAt"' + (f.dateType !== 'lastUpdated' ? ' selected' : '') + '>Tanggal masuk</option><option value="lastUpdated"' + (f.dateType === 'lastUpdated' ? ' selected' : '') + '>Terakhir di-update</option></select></label>' +
+    '<div class="grid2" style="margin-top:10px"><label class="field"><span>Dari</span><input id="lfFrom" type="date" value="' + esc(f.from) + '"></label><label class="field"><span>Sampai</span><input id="lfTo" type="date" value="' + esc(f.to) + '"></label></div>' +
+    '<button class="btn btn-tinted" style="margin-top:18px" onclick="leadFilter={status:\'\',project:\'\',dateType:\'createdAt\',from:\'\',to:\'\'};closeSheet();rerender()">Hapus semua filter</button>' +
+    '<p class="foot">Filter berlaku bersama pilihan Perlu tindak / Semua / Hot / Selesai dan pencarian.</p>';
+};
+function applyLeadFilter() {
+  leadFilter = { status: $('lfStatus').value, project: $('lfProject').value, dateType: $('lfType').value, from: $('lfFrom').value, to: $('lfTo').value };
+  closeSheet(); rerender();
+}
+SHEETS.leadExport = function () {
+  const n = filteredLeads().length;
+  return sheetHead('Export') + '<p class="foot" style="margin-top:0">' + n + ' lead sesuai filter yang sedang aktif akan diekspor.</p>' +
+    '<button class="btn btn-primary" style="margin-top:10px" onclick="closeSheet();exportLeadsPdfV2()">Unduh PDF</button>' +
+    '<button class="btn btn-tinted" style="margin-top:10px" onclick="closeSheet();exportLeadsCsvV2()">Unduh CSV (Excel)</button>';
+};
+function showStaleLeadsV2() {
+  const d = new Date(Date.now() - 45 * 86400000);
+  leadFilter = { status: '', project: '', dateType: 'lastUpdated', from: '', to: toDateInputValue(d) };
+  leadSeg = 'all'; leadQuery = ''; go('leads');
+}
+function exportLeadsCsvV2() {
+  const list = filteredLeads();
+  if (!list.length) { alert('Tidak ada data lead yang cocok dengan filter aktif untuk diekspor.'); return; }
+  const cell = function (v) { const s = v == null ? '' : String(v); return /[",\n\r]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; };
+  const rows = [['Tanggal Masuk', 'Nama Buyer', 'No. WhatsApp', 'Sumber Iklan', 'Proyek', 'Marketing', 'Status', 'Hot Prospek']].concat(list.map(function (l) {
+    return [formatDateID(toJsDate(l.createdAt)), l.buyerName || '-', l.waNumber || '-', l.adSource || '-', l.project || '-', l.assignedTo || '-', l.status || '-', l.isHot ? 'Ya' : 'Tidak'];
+  }));
+  const blob = new Blob(['﻿' + rows.map(function (r) { return r.map(cell).join(','); }).join('\r\n')], { type: 'text/csv;charset=utf-8' });
+  const who = role === 'marketing' ? currentUser.name : (leadMk || 'semua-marketing');
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'laporan-lead-' + slugifyFilename(who) + '-' + toDateInputValue(new Date()) + '.csv';
+  document.body.appendChild(a); a.click(); setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+}
+
+// =====================================================================
+// Daftar lead: mode Pilih (hapus banyak) & Export PDF — sama dengan tampilan lama
+// =====================================================================
+let selMode = false;
+const selIds = new Set();
+function canDeleteLead(l) { return role === 'marketing' ? l.isSelfInput === true && l.assignedTo === currentUser.name : isTeamRole(); }
+function toggleSelMode(on) { selMode = on; selIds.clear(); rerender(); }
+function toggleSel(id) { if (selIds.has(id)) selIds.delete(id); else selIds.add(id); rerender(); }
+function bulkDeleteLeads() {
+  const pool = leadsPool(), ids = Array.from(selIds).filter(function (id) { const l = pool.find(function (x) { return x.id === id; }); return l && canDeleteLead(l); });
+  if (!ids.length) return;
+  if (!confirm('Peringatan: ' + ids.length + ' lead yang dipilih akan dihapus permanen. Apakah Anda yakin?')) return;
+  if (!confirm('Konfirmasi terakhir: hapus ' + ids.length + ' lead sekarang? Tindakan ini tidak bisa dibatalkan.')) return;
+  const leads = ids.map(function (id) { return pool.find(function (x) { return x.id === id; }); });
+  commitInChunks(ids, function (b, id) { b.delete(db.collection('leads').doc(id)); }).then(function () {
+    leads.forEach(function (l) { if (l) waIndexRemove(l.id, l.waNumber); });
+    toast(ids.length + ' lead dihapus'); toggleSelMode(false);
+    if (role === 'marketing') afterKpiChange();
+  }).catch(function (e) { alert('Gagal menghapus lead: ' + e.message); });
+}
+function exportLeadsPdfV2() {
+  const list = filteredLeads();
+  if (!list.length) { alert('Tidak ada data lead yang cocok dengan filter aktif untuk diekspor.'); return; }
+  const libs = window.jspdf && window.jspdf.jsPDF && window.jspdf.jsPDF.API && window.jspdf.jsPDF.API.autoTable ? Promise.resolve()
+    : loadScript('https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js').then(function () { return loadScript('https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js'); });
+  const segLabel = { todo: 'Perlu tindak', all: 'Semua aktif', hot: 'Hot', done: 'Selesai' }[leadSeg] || '';
+  const who = role === 'marketing' ? currentUser.name : (leadMk || 'Semua marketing');
+  libs.then(function () {
+    const doc = buildLeadsPdfDoc(list, [role === 'marketing' ? 'Panel Marketing' : 'Panel ' + (role === 'cs' ? 'CS' : 'SPV/Admin'), 'Marketing: ' + who, 'Filter: ' + segLabel + (leadQuery.trim() ? ' · cari "' + leadQuery.trim() + '"' : '')]);
+    if (doc) doc.save('laporan-lead-' + slugifyFilename(who) + '-' + toDateInputValue(new Date()) + '.pdf');
+  }).catch(function (e) { alert(e.message); });
+}
+
+// =====================================================================
+// Log Pengingat WA (SPV/Manager, Super Admin, CS): siapa mengingatkan siapa, 1/7/30 hari
+// =====================================================================
+SHEETS.reminderLog = function () {
+  const f = sheetState.form;
+  if (!f.init) {
+    f.init = true; f.preset = 'today'; f.open = {};
+    const since = new Date(); since.setDate(since.getDate() - 30); since.setHours(0, 0, 0, 0);
+    db.collection('reminderLogs').where('createdAt', '>=', since).orderBy('createdAt', 'desc').get()
+      .then(function (s) { f.docs = s.docs.map(function (d) { return Object.assign({ id: d.id }, d.data({ serverTimestamps: 'estimate' })); }); })
+      .catch(function (e) { f.err = e.message; f.docs = []; })
+      .finally(function () { if (sheetState && sheetState.form === f) renderSheet(); });
+  }
+  const chip = function (label, on, js) { return '<button class="pill ' + (on ? 'p-blue' : 'p-gray') + '" style="border:0;font-size:13px;padding:6px 12px" onclick="' + js + '">' + label + '</button>'; };
+  const head = sheetHead('Log Pengingat') + '<div class="hstack" style="gap:8px">' +
+    chip('Hari ini', f.preset === 'today', "sheetState.form.preset='today';renderSheet()") + chip('7 hari', f.preset === '7', "sheetState.form.preset='7';renderSheet()") + chip('30 hari', f.preset === '30', "sheetState.form.preset='30';renderSheet()") + '</div>';
+  if (!f.docs) return head + '<div class="loading">Memuat…</div>';
+  if (f.err) return head + '<div class="card empty" style="color:var(--red)">Gagal memuat: ' + esc(f.err) + '</div>';
+  const days = f.preset === 'today' ? 1 : Number(f.preset), n = new Date(), from = new Date(n.getFullYear(), n.getMonth(), n.getDate() - (days - 1));
+  const docs = f.docs.filter(function (r) { return toJsDate(r.createdAt) >= from; });
+  const by = {};
+  docs.forEach(function (r) { const k = r.senderEmail || r.senderUid || '-'; if (!by[k]) by[k] = { name: r.senderName || k, count: 0 }; by[k].count++; });
+  const rank = Object.keys(by).map(function (k) { return by[k]; }).sort(function (a, b) { return b.count - a.count; });
+  const max = rank.length ? rank[0].count : 1;
+  const sessMap = {}, sessions = [];
+  docs.slice().reverse().forEach(function (r) {
+    const k = r.sessionId || r.id;
+    if (!sessMap[k]) { sessMap[k] = { key: k, senderName: r.senderName, senderRole: r.senderRole, groupKey: r.groupKey, items: [] }; sessions.push(sessMap[k]); }
+    sessMap[k].items.push(r);
+  });
+  sessions.sort(function (a, b) { return toJsDate(b.items[b.items.length - 1].createdAt) - toJsDate(a.items[a.items.length - 1].createdAt); });
+  return head +
+    (rank.length ? '<div class="section-h"><h2 style="font-size:17px">Paling sering mengingatkan</h2></div><div class="card">' + rank.map(function (r) {
+      return '<div class="hstack" style="gap:10px;margin:4px 0"><span style="width:110px;font-weight:600;font-size:14.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(r.name) + '</span><div class="bar" style="flex:1"><i style="width:' + Math.round(r.count / max * 100) + '%"></i></div><span class="num small">' + r.count + 'x</span></div>';
+    }).join('') + '</div>' : '') +
+    '<div class="section-h"><h2 style="font-size:17px">Sesi pengingat</h2><span class="muted tiny">' + sessions.length + ' sesi · ' + docs.length + ' marketing</span></div>' +
+    (sessions.length ? '<div class="group">' + sessions.map(function (s) {
+      const first = toJsDate(s.items[0].createdAt), last = toJsDate(s.items[s.items.length - 1].createdAt), open = !!f.open[s.key];
+      const roleLab = s.senderRole === 'Admin' ? 'SPV' : (ROLE_LABELS[s.senderRole] || s.senderRole || '');
+      return '<button class="row" style="flex-direction:column;align-items:stretch;gap:4px" onclick="sheetState.form.open[\'' + esc(s.key) + '\']=!sheetState.form.open[\'' + esc(s.key) + '\'];renderSheet()">' +
+        '<div class="hstack"><div class="t" style="flex:1">' + esc(s.senderName || '-') + (roleLab ? ' <span class="pill p-blue">' + esc(roleLab) + '</span>' : '') + '</div><span class="muted tiny">' + formatDateID(first) + ' ' + formatTimeID(first) + (formatTimeID(last) !== formatTimeID(first) ? '–' + formatTimeID(last) : '') + '</span></div>' +
+        '<div class="s">' + s.items.length + ' marketing diingatkan' + (s.groupKey ? ' · ' + (s.groupKey === 'group2' ? 'Grup B' : 'Grup A') : '') + ' · ' + (open ? 'tutup' : 'lihat') + '</div>' +
+        (open ? '<div style="margin-top:6px">' + s.items.map(function (r) { return '<div class="hstack small" style="padding:3px 0"><span style="flex:1">' + esc(r.marketingName || '-') + '</span><span class="muted">' + (Number(r.leadCount) || 0) + ' lead · ' + formatTimeID(toJsDate(r.createdAt)) + '</span></div>'; }).join('') + '</div>' : '') + '</button>';
+    }).join('') + '</div>' : '<div class="card empty">Belum ada pengingat pada rentang ini.</div>');
+};
+
+// =====================================================================
+// Riwayat aktivitas satu marketing (marketingActivity/{uid}/logs, 30 hari)
+// =====================================================================
+SHEETS.actLog = function (name) {
+  const f = sheetState.form, u = usersData.find(function (x) { return x.name === name; });
+  const act = marketingActivityData[String(name || '').trim().toLowerCase()];
+  const uid = (act && act.uid) || (u && u.uid);
+  if (!f.init) {
+    f.init = true; f.preset = 'today';
+    if (uid) {
+      const since = new Date(); since.setDate(since.getDate() - 30); since.setHours(0, 0, 0, 0);
+      db.collection('marketingActivity').doc(uid).collection('logs').where('createdAt', '>=', since).orderBy('createdAt', 'desc').limit(300).get()
+        .then(function (s) { f.docs = s.docs.map(function (d) { return Object.assign({ id: d.id }, d.data({ serverTimestamps: 'estimate' })); }); })
+        .catch(function (e) { f.err = e.message; f.docs = []; })
+        .finally(function () { if (sheetState && sheetState.form === f) renderSheet(); });
+    } else f.docs = [];
+  }
+  const chip = function (label, on, js) { return '<button class="pill ' + (on ? 'p-blue' : 'p-gray') + '" style="border:0;font-size:13px;padding:6px 12px" onclick="' + js + '">' + label + '</button>'; };
+  const lastUpd = act && act.lastUpdateAt ? toJsDate(act.lastUpdateAt) : null, lastLogin = act && act.lastLoginAt ? toJsDate(act.lastLoginAt) : null;
+  let html = sheetHead('Aktivitas ' + esc(String(name || '').split(' ')[0])) +
+    '<div class="card" style="padding:12px 16px"><div style="font-weight:600">' + esc(name || '-') + '</div><div class="muted tiny" style="margin-top:2px;line-height:1.45">' +
+    (lastUpd ? 'Terakhir update data: ' + timeAgoID(lastUpd) : 'Belum ada update data') + (lastLogin ? '<br>Terakhir buka aplikasi: ' + timeAgoID(lastLogin) : '') + '</div></div>' +
+    '<div class="hstack" style="gap:8px;margin-top:12px">' + chip('Hari ini', f.preset === 'today', "sheetState.form.preset='today';renderSheet()") + chip('7 hari', f.preset === '7', "sheetState.form.preset='7';renderSheet()") + chip('30 hari', f.preset === '30', "sheetState.form.preset='30';renderSheet()") + '</div>';
+  if (!f.docs) return html + '<div class="loading">Memuat…</div>';
+  if (f.err) return html + '<div class="card empty" style="color:var(--red)">Gagal memuat riwayat: ' + esc(f.err) + '</div>';
+  const days = f.preset === 'today' ? 1 : Number(f.preset), n = new Date(), from = new Date(n.getFullYear(), n.getMonth(), n.getDate() - (days - 1));
+  const docs = f.docs.filter(function (r) { return toJsDate(r.createdAt) >= from; });
+  if (!docs.length) return html + '<div class="card empty" style="margin-top:12px">Tidak ada aktivitas pada rentang ini.</div>';
+  let lastDay = '', groupOpen = false;
+  docs.forEach(function (r) {
+    const d = toJsDate(r.createdAt), key = toDateInputValue(d);
+    if (key !== lastDay) {
+      if (groupOpen) html += '</div>';
+      lastDay = key; const diff = daysDiffDateOnly(new Date(), d);
+      html += '<div class="section-h"><h2 style="font-size:16px">' + (diff <= 0 ? 'Hari ini' : diff === 1 ? 'Kemarin' : formatDateID(d)) + '</h2></div><div class="group">'; groupOpen = true;
+    }
+    html += '<div class="row" style="align-items:flex-start"><div class="main"><div class="t">' + esc(r.action || '-') + '</div>' + (r.leadName ? '<div class="s">Lead: ' + esc(r.leadName) + '</div>' : '') + (r.detail ? '<div class="s wrap">' + esc(r.detail) + '</div>' : '') + '</div><span class="muted tiny">' + formatTimeID(d) + '</span></div>';
+  });
+  return html + (groupOpen ? '</div>' : '') + '<p class="foot">' + docs.length + ' aktivitas' + (f.docs.length >= 300 ? ' (300 entri terbaru)' : '') + '</p>';
+};
 
 // =====================================================================
 // Super Admin: Kelola Akun & Proyek, Reset Data, Atur Target KPI, Tes Push
@@ -2017,7 +2205,7 @@ function waLoadTodayLogs() {
 function waTodayFor(f, name) { return (f.logs || []).filter(function (r) { return r.marketingName === name; }); }
 function waSetGroup(g) { sheetState.form.group = g; sheetState.form.confirm = null; renderSheet(); }
 SHEETS.waRemind = function () {
-  if (!canBroadcastV2()) return sheetHead('Kirim Pengingat WA') + '<div class="card empty">Hanya untuk SPV/Manager dan Super Admin.</div>';
+  if (!isTeamRole()) return sheetHead('Kirim Pengingat WA') + '<div class="card empty">Hanya untuk CS, SPV/Manager, dan Super Admin.</div>';
   const f = sheetState.form;
   if (!f.init) { f.init = true; f.group = 'A'; f.session = currentUser.uid + '-' + Date.now(); waLoadTodayLogs(); }
   const mk = activeMarketingUsers(), hasB = mk.some(function (u) { return u.group === 'B'; });
@@ -2240,7 +2428,8 @@ SHEETS.person = function (i) {
   if (!r.reports) kpiFetchRowReports(r, false);
   loadTrend(r.uid);
   return sheetHead('KPI ' + esc(r.name.split(' ')[0])) + kpiPersonBody(r, kpiData.month, false) +
-    '<button class="btn btn-tinted" style="margin-top:18px" onclick="leadMk=\'' + esc(r.name).replace(/'/g, "\\'") + '\';leadSeg=\'all\';closeSheet();go(\'leads\')">Lihat lead ' + esc(r.name.split(' ')[0]) + '</button>';
+    '<div class="grid2" style="margin-top:18px"><button class="btn btn-tinted" onclick="leadMk=\'' + esc(r.name).replace(/'/g, "\\'") + '\';leadSeg=\'all\';closeSheet();go(\'leads\')">Lihat lead</button>' +
+    '<button class="btn btn-tinted" onclick="openSheet(\'actLog\',\'' + esc(r.name).replace(/'/g, "\\'") + '\')">Aktivitas</button></div>';
 };
 
 SHEETS.pdf = function () {
